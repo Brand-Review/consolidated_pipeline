@@ -1,0 +1,13 @@
+# Default Brand Voice Configuration
+brand_voice:
+  formality_score: 60
+  confidence_level: "balanced"
+  warmth_score: 50
+  energy_score: 50
+  readability_level: "grade8"
+  persona_type: "general"
+  allow_emojis: false
+  allow_slang: false
+  no_financial_guarantees: true
+  no_medical_claims: true
+  no_competitor_bashing: true

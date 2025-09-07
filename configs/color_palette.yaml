@@ -1,0 +1,46 @@
+# Default Brand Color Palette Configuration
+brand_palette:
+  name: "Default"
+  primary_colors:
+    - name: "Primary Blue"
+      hex: "#1E40AF"
+      rgb: [30, 64, 175]
+      tolerance: 0.1
+    - name: "Primary Dark"
+      hex: "#1E293B"
+      rgb: [30, 41, 59]
+      tolerance: 0.1
+  secondary_colors:
+    - name: "Secondary Gray"
+      hex: "#64748B"
+      rgb: [100, 116, 139]
+      tolerance: 0.1
+    - name: "Light Gray"
+      hex: "#F1F5F9"
+      rgb: [241, 245, 249]
+      tolerance: 0.1
+  accent_colors:
+    - name: "Accent Orange"
+      hex: "#F97316"
+      rgb: [249, 115, 22]
+      tolerance: 0.1
+    - name: "Accent Green"
+      hex: "#10B981"
+      rgb: [16, 185, 129]
+      tolerance: 0.1
+
+# New Brand Color Validation Configuration
+brand_color_validation:
+  # Matching thresholds (0-100%)
+  primary_threshold: 75
+  secondary_threshold: 75
+  accent_threshold: 75
+  
+  # CIEDE2000 color difference tolerance
+  color_tolerance: 2.3
+  
+  # Enable category-based validation
+  enable_category_validation: true
+  
+  # Enable similarity scoring
+  enable_similarity_scoring: true

@@ -1,0 +1,15 @@
+# Default Typography Rules Configuration
+typography_rules:
+  approved_fonts:
+    - "Arial"
+    - "Helvetica"
+    - "Times New Roman"
+    - "Georgia"
+  max_font_size: 72
+  min_font_size: 8
+  preferred_font_families:
+    - "sans-serif"
+    - "serif"
+  forbidden_fonts: []
+  line_height_ratio: 1.5
+  letter_spacing: 0.0

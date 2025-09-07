@@ -1,0 +1,22 @@
+# Default Logo Detection Configuration
+logo_detection:
+  confidence_threshold: 0.5
+  iou_threshold: 0.45
+  max_detections: 100
+  min_logo_size: 20
+  max_logo_size: 500
+  placement_rules: {}
+  
+  # YOLOv8 nano configuration
+  yolo_model: "yolov8n.pt"
+  use_yolo: true
+  
+  # Qwen2.5-VL-3B-Instruct configuration via vLLM
+  use_qwen: true
+  qwen_model: "Qwen/Qwen2.5-VL-3B-Instruct"
+  qwen_api_url: "http://localhost:8000/v1/chat/completions"
+  qwen_timeout: 120
+  
+  # Detection combination
+  combine_detections: true
+  enhance_yolo_with_qwen: true
