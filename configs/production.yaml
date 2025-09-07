@@ -1,0 +1,123 @@
+# BrandGuard Production Configuration
+# Optimized settings for production deployment
+
+# Server Configuration
+server:
+  host: "0.0.0.0"
+  port: 5001
+  debug: false
+  workers: 4
+  max_content_length: 52428800  # 50MB
+  timeout: 300
+
+# Model Configuration
+models:
+  # vLLM Server Configuration
+  vllm:
+    enabled: true
+    host: "localhost"
+    port: 8000
+    timeout: 120
+    max_retries: 3
+    retry_delay: 5
+  
+  # Color Analysis Configuration
+  color_analysis:
+    enabled: true
+    n_colors: 8
+    n_clusters: 8
+    color_tolerance: 2.3
+    enable_contrast_check: true
+    primary_threshold: 75
+    secondary_threshold: 75
+    accent_threshold: 75
+  
+  # Typography Analysis Configuration
+  typography:
+    enabled: true
+    confidence_threshold: 0.7
+    merge_regions: true
+    distance_threshold: 20
+    enable_font_validation: true
+  
+  # Copywriting Analysis Configuration
+  copywriting:
+    enabled: true
+    formality_score: 60
+    confidence_level: "balanced"
+    warmth_score: 50
+    energy_score: 50
+    enable_brand_voice_check: true
+  
+  # Logo Detection Configuration
+  logo_detection:
+    enabled: true
+    confidence_threshold: 0.5
+    max_detections: 100
+    enable_placement_validation: true
+    enable_brand_compliance: true
+    generate_annotations: true
+    allowed_zones: ["top-left", "top-right", "bottom-left", "bottom-right"]
+    min_logo_size: 0.01
+    max_logo_size: 0.25
+    min_edge_distance: 0.05
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  file: "logs/api.log"
+  max_size: "10MB"
+  backup_count: 5
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Performance Configuration
+performance:
+  enable_caching: true
+  cache_ttl: 3600  # 1 hour
+  max_concurrent_requests: 10
+  request_timeout: 300
+
+# Security Configuration
+security:
+  enable_cors: true
+  allowed_origins: ["*"]
+  enable_rate_limiting: false
+  max_requests_per_minute: 100
+
+# File Upload Configuration
+file_upload:
+  allowed_extensions: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp", ".pdf", ".txt", ".doc", ".docx"]
+  max_file_size: 52428800  # 50MB
+  upload_folder: "uploads"
+  results_folder: "results"
+
+# Brand Configuration
+brand:
+  default_palette:
+    primary_colors: []
+    secondary_colors: []
+    accent_colors: []
+  
+  typography_rules:
+    approved_fonts: []
+    max_font_size: 72
+    min_font_size: 8
+  
+  brand_voice:
+    formality_score: 60
+    confidence_level: "balanced"
+    warmth_score: 50
+    energy_score: 50
+
+# Monitoring Configuration
+monitoring:
+  enable_metrics: true
+  metrics_endpoint: "/api/metrics"
+  health_check_interval: 30
+  enable_health_checks: true
+
+# Error Handling Configuration
+error_handling:
+  enable_detailed_errors: false
+  log_errors: true
+  error_notification: false
