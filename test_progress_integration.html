@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Progress Bar Integration Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* Progress Steps */
+        .progress-steps {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+            padding: 0 10px;
+        }
+        
+        .step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex: 1;
+            position: relative;
+        }
+        
+        .step:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            top: 20px;
+            right: -50%;
+            width: 100%;
+            height: 2px;
+            background: #e9ecef;
+            z-index: 1;
+        }
+        
+        .step.active:not(:last-child)::after {
+            background: #007bff;
+        }
+        
+        .step.completed:not(:last-child)::after {
+            background: #28a745;
+        }
+        
+        .step-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #e9ecef;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            margin-bottom: 8px;
+            z-index: 2;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+        
+        .step.active .step-icon {
+            background: #007bff;
+            color: white;
+            transform: scale(1.1);
+        }
+        
+        .step.completed .step-icon {
+            background: #28a745;
+            color: white;
+        }
+        
+        .step-text {
+            font-size: 12px;
+            color: #6c757d;
+            text-align: center;
+            font-weight: 500;
+        }
+        
+        .step.active .step-text {
+            color: #007bff;
+            font-weight: 600;
+        }
+        
+        .step.completed .step-text {
+            color: #28a745;
+            font-weight: 600;
+        }
+        
+        /* Progress Bar */
+        .progress {
+            background-color: #e9ecef;
+            border-radius: 15px;
+            overflow: hidden;
+        }
+        
+        .progress-bar {
+            background: linear-gradient(45deg, #007bff, #0056b3);
+            border-radius: 15px;
+            transition: width 0.5s ease;
+            position: relative;
+        }
+        
+        .progress-bar-striped {
+            background-image: linear-gradient(45deg, rgba(255,255,255,.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.15) 50%, rgba(255,255,255,.15) 75%, transparent 75%, transparent);
+            background-size: 1rem 1rem;
+        }
+        
+        .progress-bar-animated {
+            animation: progress-bar-stripes 1s linear infinite;
+        }
+        
+        @keyframes progress-bar-stripes {
+            from { background-position: 1rem 0; }
+            to { background-position: 0 0; }
+        }
+        
+        #progressText {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Progress Bar Integration Test</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <button class="btn btn-primary me-2" onclick="startAnalysis()">🚀 Start Analysis</button>
+                            <button class="btn btn-success me-2" onclick="simulateBackendProgress()">📡 Simulate Backend Progress</button>
+                            <button class="btn btn-warning me-2" onclick="simulateError()">❌ Simulate Error</button>
+                            <button class="btn btn-secondary" onclick="resetProgress()">🔄 Reset</button>
+                        </div>
+                        
+                        <div class="progress mb-3" style="height: 25px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 role="progressbar" 
+                                 style="width: 0%" 
+                                 id="progressBar">
+                                <span id="progressText">0%</span>
+                            </div>
+                        </div>
+                        
+                        <div class="text-center">
+                            <p class="mb-2" id="progressStatus">Ready to start analysis...</p>
+                            <div class="progress-steps">
+                                <div class="step" id="step1">
+                                    <span class="step-icon">⏳</span>
+                                    <span class="step-text">Color Analysis</span>
+                                </div>
+                                <div class="step" id="step2">
+                                    <span class="step-icon">⏳</span>
+                                    <span class="step-text">Typography</span>
+                                </div>
+                                <div class="step" id="step3">
+                                    <span class="step-icon">⏳</span>
+                                    <span class="step-text">Copywriting</span>
+                                </div>
+                                <div class="step" id="step4">
+                                    <span class="step-icon">⏳</span>
+                                    <span class="step-text">Logo Detection</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <h6>Test Scenarios:</h6>
+                            <ul>
+                                <li><strong>Start Analysis:</strong> Simulates the normal analysis flow</li>
+                                <li><strong>Simulate Backend Progress:</strong> Shows how backend can update progress</li>
+                                <li><strong>Simulate Error:</strong> Demonstrates error handling</li>
+                                <li><strong>Reset:</strong> Clears all progress</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let progressInterval = null;
+        let currentStep = 1;
+        let currentProgress = 0;
+        
+        function updateProgress(percentage, status) {
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const progressStatus = document.getElementById('progressStatus');
+            
+            progressBar.style.width = percentage + '%';
+            progressText.textContent = Math.round(percentage) + '%';
+            progressStatus.textContent = status;
+        }
+        
+        function resetSteps() {
+            for (let i = 1; i <= 4; i++) {
+                const step = document.getElementById(`step${i}`);
+                step.classList.remove('active', 'completed');
+                const icon = step.querySelector('.step-icon');
+                icon.textContent = '⏳';
+            }
+        }
+        
+        function activateStep(stepNumber) {
+            // Mark previous steps as completed
+            for (let i = 1; i < stepNumber; i++) {
+                const step = document.getElementById(`step${i}`);
+                step.classList.add('completed');
+                const icon = step.querySelector('.step-icon');
+                icon.textContent = '✅';
+            }
+            
+            // Mark current step as active
+            const currentStep = document.getElementById(`step${stepNumber}`);
+            currentStep.classList.add('active');
+            const icon = currentStep.querySelector('.step-icon');
+            icon.textContent = '🔄';
+        }
+        
+        function completeStep(stepNumber) {
+            const step = document.getElementById(`step${stepNumber}`);
+            step.classList.remove('active');
+            step.classList.add('completed');
+            const icon = step.querySelector('.step-icon');
+            icon.textContent = '✅';
+        }
+        
+        function startAnalysis() {
+            resetSteps();
+            updateProgress(0, 'Initializing analysis...');
+            
+            currentStep = 1;
+            currentProgress = 0;
+            
+            // Start progress simulation
+            progressInterval = setInterval(() => {
+                if (currentStep <= 4) {
+                    activateStep(currentStep);
+                    
+                    const stepProgress = Math.min(currentProgress, (currentStep * 25));
+                    updateProgress(stepProgress, `Running ${getStepName(currentStep)}...`);
+                    
+                    currentProgress += 1;
+                    
+                    if (currentProgress >= (currentStep * 25)) {
+                        completeStep(currentStep);
+                        currentStep++;
+                        
+                        if (currentStep > 4) {
+                            updateProgress(95, 'Finalizing analysis...');
+                            clearInterval(progressInterval);
+                            
+                            // Simulate completion delay
+                            setTimeout(() => {
+                                updateProgress(100, 'Analysis completed!');
+                                setTimeout(() => {
+                                    updateProgress(100, 'Results ready!');
+                                }, 1000);
+                            }, 2000);
+                        }
+                    }
+                }
+            }, 150);
+        }
+        
+        function simulateBackendProgress() {
+            // Simulate backend sending progress updates
+            const steps = [
+                { step: 1, name: 'Color Analysis', progress: 80 },
+                { step: 2, name: 'Typography Analysis', progress: 60 },
+                { step: 3, name: 'Copywriting Analysis', progress: 40 },
+                { step: 4, name: 'Logo Detection', progress: 20 }
+            ];
+            
+            let currentStepIndex = 0;
+            
+            const backendProgress = setInterval(() => {
+                if (currentStepIndex < steps.length) {
+                    const stepInfo = steps[currentStepIndex];
+                    activateStep(stepInfo.step);
+                    
+                    const stepProgress = (stepInfo.step - 1) * 25 + (stepInfo.progress * 0.25);
+                    updateProgress(stepProgress, `Backend: ${stepInfo.name} at ${stepInfo.progress}%`);
+                    
+                    currentStepIndex++;
+                } else {
+                    clearInterval(backendProgress);
+                    updateProgress(100, 'Backend analysis completed!');
+                }
+            }, 1000);
+        }
+        
+        function simulateError() {
+            // Stop any running progress
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
+            
+            // Show error state
+            updateProgress(0, 'Analysis failed');
+            resetSteps();
+            
+            // Show error message
+            alert('Simulated error: Analysis failed due to network timeout');
+            
+            // Hide progress after error
+            setTimeout(() => {
+                updateProgress(0, 'Ready to retry...');
+            }, 2000);
+        }
+        
+        function resetProgress() {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
+            
+            resetSteps();
+            updateProgress(0, 'Ready to start analysis...');
+            currentStep = 1;
+            currentProgress = 0;
+        }
+        
+        function getStepName(stepNumber) {
+            const stepNames = [
+                'Color Analysis',
+                'Typography Analysis',
+                'Copywriting Analysis',
+                'Logo Detection'
+            ];
+            return stepNames[stepNumber - 1] || 'Unknown Step';
+        }
+    </script>
+</body>
+</html>

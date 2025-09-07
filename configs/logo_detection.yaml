@@ -1,0 +1,8 @@
+# Default Logo Detection Configuration
+logo_detection:
+  confidence_threshold: 0.5
+  iou_threshold: 0.45
+  max_detections: 100
+  min_logo_size: 20
+  max_logo_size: 500
+  placement_rules: {}
