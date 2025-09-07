@@ -179,7 +179,7 @@ phase2_security() {
     chown -R brandguard:brandguard /opt/brandguard
     
     # Configure firewall
-    if [ "$SKIP_FIREWALL" = false ]; then
+    if [ "$SKIP_FIREWALL" = True ]; then
         print_status "Configuring firewall..."
         ufw --force enable
         ufw allow 22
