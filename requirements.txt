@@ -46,3 +46,9 @@ pytest-cov>=2.12.0
 black>=21.0.0
 flake8>=3.9.0
 mypy>=0.910
+
+
+fastapi[all]>=0.111
+uvicorn[standard]
+python-multipart   # file uploads
+aiofiles           # static file serving
