@@ -2386,17 +2386,19 @@
         }
         
         // File name updates
+        // Global demo instance
+        let globalDemo = null;
+        
         function updateFileName() {
             const file = document.getElementById('file').files[0];
-            if (file) {
-                const demo = new BrandAnalysisDemo();
-                demo.handleFileSelect(file);
+            if (file && globalDemo) {
+                globalDemo.handleFileSelect(file);
             }
         }
         
         // Initialize demo
         document.addEventListener('DOMContentLoaded', () => {
-            new BrandAnalysisDemo();
+            globalDemo = new BrandAnalysisDemo();
             toggleInputType(); // Initialize input type display
             
             // Initialize range input displays

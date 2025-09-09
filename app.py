@@ -45,6 +45,8 @@ if settings:
         logger.info("Pipeline orchestrator initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize pipeline: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
 
 # App configuration
 app.config['MAX_CONTENT_LENGTH'] = settings.max_file_size if settings else 50 * 1024 * 1024
@@ -94,7 +96,11 @@ def health():
         'timestamp': datetime.now().isoformat(),
         'pipeline_ready': pipeline is not None,
         'settings_loaded': settings is not None,
-        'version': '1.0.0'
+        'version': '1.0.0',
+        'debug_info': {
+            'pipeline_type': type(pipeline).__name__ if pipeline else None,
+            'settings_type': type(settings).__name__ if settings else None
+        }
     })
 
 @app.route('/api/analyze', methods=['POST'])
@@ -106,6 +112,8 @@ def analyze_content():
         
         # Get input type
         input_type = request.form.get('input_type', 'file')
+
+        
         
         # Handle different input types
         if input_type == 'file':
@@ -154,20 +162,20 @@ def analyze_content():
         else:
             return jsonify({'error': f'Unsupported input type: {input_type}'}), 400
         
-        # Get analysis options
+        # Get analysis options - DEBUGGING: Only logo analysis enabled
         analysis_options = {
                    'analysis_priority': request.form.get('analysis_priority', 'balanced'),
                    'report_detail': request.form.get('report_detail', 'detailed'),
                    'include_recommendations': request.form.get('include_recommendations', 'true').lower() == 'true',
                    
+                   # DEBUGGING: Commented out other analyses
                    'color_analysis': {
-                       'enabled': request.form.get('enable_color', 'true').lower() == 'true',
+                       'enabled': False,  # DEBUGGING: Disabled
                        'n_colors': int(request.form.get('color_n_colors', 8)),
                        'n_clusters': int(request.form.get('color_n_colors', 8)),
                        'color_tolerance': float(request.form.get('color_tolerance', 2.3)),
                        'enable_contrast_check': request.form.get('enable_contrast_check', 'true').lower() == 'true',
                        'brand_palette': request.form.get('brand_palette', '').strip(),
-                       # New brand color validation features
                        'primary_colors': request.form.get('primary_colors', '').strip(),
                        'secondary_colors': request.form.get('secondary_colors', '').strip(),
                        'accent_colors': request.form.get('accent_colors', '').strip(),
@@ -176,7 +184,7 @@ def analyze_content():
                        'accent_threshold': int(request.form.get('accent_threshold', 75))
                    },
                    'typography_analysis': {
-                       'enabled': request.form.get('enable_typography', 'true').lower() == 'true',
+                       'enabled': False,  # DEBUGGING: Disabled
                        'merge_regions': request.form.get('merge_regions', 'true').lower() == 'true',
                        'distance_threshold': int(request.form.get('distance_threshold', 20)),
                        'confidence_threshold': float(request.form.get('typography_confidence_threshold', 0.7)),
@@ -184,7 +192,7 @@ def analyze_content():
                        'expected_fonts': request.form.get('expected_fonts', '').strip()
                    },
                    'copywriting_analysis': {
-                       'enabled': request.form.get('enable_copywriting', 'true').lower() == 'true',
+                       'enabled': False,  # DEBUGGING: Disabled
                        'include_suggestions': True,
                        'include_industry_benchmarks': True,
                        'enable_brand_profile_matching': True,
@@ -194,7 +202,7 @@ def analyze_content():
                        'energy_score': int(request.form.get('energy_score', 50))
                    },
                    'logo_analysis': {
-                       'enabled': request.form.get('enable_logo', 'true').lower() == 'true',
+                       'enabled': True,  # DEBUGGING: Only logo analysis enabled
                        'enable_placement_validation': request.form.get('enable_placement_validation', 'true').lower() == 'true',
                        'enable_brand_compliance': True,
                        'generate_annotations': request.form.get('generate_annotations', 'true').lower() == 'true',
@@ -211,9 +219,9 @@ def analyze_content():
                        'pass_threshold': float(request.form.get('pass_threshold', 0.7)),
                        'warning_threshold': float(request.form.get('warning_threshold', 0.5)),
                        'critical_threshold': float(request.form.get('critical_threshold', 0.3)),
-                       # LLVa with Ollama integration
-                       'enable_llva_ollama': request.form.get('enable_llva_ollama', 'false').lower() == 'true',
-                       'llva_analysis_focus': request.form.get('llva_analysis_focus', 'comprehensive')
+                   #    # LLVa with Ollama integration
+                   #    'enable_llva_ollama': request.form.get('enable_llva_ollama', 'false').lower() == 'true',
+                   #    'llva_analysis_focus': request.form.get('llva_analysis_focus', 'comprehensive')
                    }
                }
         
@@ -492,9 +500,11 @@ def analyze_logos():
         # Get logo analysis options
         analysis_options = {
             'logo_analysis': {
+                'enabled': True,
                 'enable_placement_validation': request.form.get('enable_placement_validation', 'true').lower() == 'true',
                 'enable_brand_compliance': request.form.get('enable_brand_compliance', 'true').lower() == 'true',
-                'generate_annotations': request.form.get('generate_annotations', 'true').lower() == 'true'
+                'generate_annotations': request.form.get('generate_annotations', 'true').lower() == 'true',
+                'confidence_threshold': float(request.form.get('logo_confidence_threshold', 0.5))
             }
         }
         
@@ -521,6 +531,8 @@ def analyze_logos():
         
     except Exception as e:
         logger.error(f"Logo analysis failed: {str(e)}")
+        import traceback
+        logger.error(f"Logo analysis traceback: {traceback.format_exc()}")
         return jsonify({'error': f'Logo analysis failed: {str(e)}'}), 500
 
 @app.route('/api/status/<analysis_id>')
@@ -670,11 +682,11 @@ if __name__ == '__main__':
         
         # Run the Flask app
         app.run(
-            debug=False,
+            debug=True,
             host='0.0.0.0',
             port=5003,
             threaded=True,
-            use_reloader=False
+            use_reloader=True
         )
         
     except KeyboardInterrupt:

@@ -282,7 +282,11 @@ class PipelineOrchestrator:
             
         except Exception as e:
             logger.error(f"Error initializing models: {e}")
-            raise
+            import traceback
+            logger.error(f"Model initialization traceback: {traceback.format_exc()}")
+            # Don't raise the exception, just log it and continue with fallback
+            logger.warning("Continuing with fallback models due to initialization error")
+            self._init_fallback_models()
     
     def _init_real_models(self):
         """Initialize real working models"""
@@ -358,8 +362,24 @@ class PipelineOrchestrator:
             
             # Initialize logo detection components (only if imported successfully)
             if LogoDetector is not None:
-                self.logo_detector = LogoDetector
-                logger.info("✅ LogoDetector class available for real model usage")
+                # Create logo detector configuration - Using fine-tuned logo detection model
+                logo_config = {
+                    'type': 'yolos',  # Using YOLOS model fine-tuned for logo detection
+                    'confidence_threshold': self.settings.logo_detection.confidence_threshold,
+                    'use_yolo': self.settings.logo_detection.use_yolo,
+                    'use_qwen': self.settings.logo_detection.use_qwen,
+                    'path': 'ellabettison/Logo-Detection-finetune',  # Fine-tuned logo detection model
+                    'qwen_api_url': self.settings.logo_detection.qwen_api_url,
+                    'qwen_model': self.settings.logo_detection.qwen_model
+                }
+                
+                self.logo_detector = LogoDetector(logo_config)
+                
+                # Load the model
+                if self.logo_detector.load_model():
+                    logger.info("✅ LogoDetector initialized and fine-tuned model loaded successfully")
+                else:
+                    logger.warning("⚠️ LogoDetector initialized but model loading failed")
             else:
                 logger.warning("⚠️ LogoDetector not available, using fallback")
             
@@ -869,7 +889,7 @@ class PipelineOrchestrator:
             return {'error': f'Copywriting analysis failed: {str(e)}'}
     
     def _perform_logo_detection_analysis(self, image: np.ndarray, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Perform logo detection analysis using LogoDetector and optionally LLVa with Ollama"""
+    
         try:
             # Check if logo analysis is enabled
             if options and not options.get('enabled', True):
@@ -881,38 +901,17 @@ class PipelineOrchestrator:
             enable_brand_compliance = options.get('enable_brand_compliance', True) if options else True
             generate_annotations = options.get('generate_annotations', True) if options else True
             max_detections = options.get('max_detections', 100) if options else 100
-            
-            # LLVa with Ollama options
-            enable_llva_ollama = options.get('enable_llva_ollama', False) if options else False
-            llva_analysis_focus = options.get('llva_analysis_focus', 'comprehensive') if options else 'comprehensive'
+
             
             if MODELS_LOADED and hasattr(self, 'logo_detector') and hasattr(self, 'logo_validator'):
                 # Use real models
                 try:
+                    # YOLOv8 Detection
                     start_time = datetime.now()
                     
-                    # YOLOv8 Detection
-                    yolo_results = self._perform_yolo_detection(image, confidence_threshold, max_detections)
-                    yolo_time = (datetime.now() - start_time).total_seconds() * 1000
+                    logo_detections = self.logo_detector.detect_logos(image)
+
                     
-                    # LLVa with Ollama Analysis (if enabled)
-                    llva_results = None
-                    llva_time = 0
-                    if enable_llva_ollama:
-                        llva_start = datetime.now()
-                        llva_results = self._perform_llva_analysis(image, llva_analysis_focus)
-                        llva_time = (datetime.now() - llva_start).total_seconds() * 1000
-                    
-                    # Combine results if both are available
-                    if llva_results:
-                        combined_results = self._combine_yolo_llva_results(yolo_results, llva_results)
-                        logo_detections = combined_results['detections']
-                        analysis_type = 'combined'
-                    else:
-                        logo_detections = yolo_results['detections']
-                        analysis_type = 'yolo_only'
-                    
-                    total_time = (datetime.now() - start_time).total_seconds() * 1000
                     
                     # Validate logo placement if enabled
                     placement_validation = {}
@@ -947,19 +946,7 @@ class PipelineOrchestrator:
                         'logo_detections': logo_detections,
                         'placement_validation': placement_validation,
                         'brand_compliance': brand_compliance,
-                        'model': {
-                            'name': 'YOLOv8' + (' + LLVa' if enable_llva_ollama else ''),
-                            'file': 'yolov8n.pt',
-                            'backend': 'ultralytics' + (' + ollama' if enable_llva_ollama else ''),
-                            'analysis_type': analysis_type
-                        },
-                        'timings': {
-                            'detection_ms': yolo_time,
-                            'llva_ms': llva_time,
-                            'total_ms': total_time
-                        },
-                        'llva_analysis': llva_results if enable_llva_ollama else None,
-                        'combined_analysis': combined_results if enable_llva_ollama and llva_results else None,
+                       
                         'scores': {
                             'overall': compliance_score,
                             'strict': placement_validation.get('strict_score', 0.0)
@@ -974,16 +961,13 @@ class PipelineOrchestrator:
                             'min_logo_size': options.get('min_logo_size', 0.01),
                             'max_logo_size': options.get('max_logo_size', 0.25),
                             'min_edge_distance': options.get('min_edge_distance', 0.05),
-                            'enable_llva_ollama': enable_llva_ollama,
-                            'llva_analysis_focus': llva_analysis_focus,
                             'show_original_image': options.get('show_original_image', True),
                             'show_analysis_overlay': options.get('show_analysis_overlay', True),
                             'annotation_style': options.get('annotation_style', 'bounding_box'),
                             'annotation_color': options.get('annotation_color', 'gray'),
                             'pass_threshold': options.get('pass_threshold', 0.7),
                             'warning_threshold': options.get('warning_threshold', 0.5),
-                            'critical_threshold': options.get('critical_threshold', 0.3),
-                            'model_used': f'real_LogoDetector_{analysis_type}'
+                            'critical_threshold': options.get('critical_threshold', 0.3)
                         },
                         'compliance_score': compliance_score
                     }
@@ -1885,214 +1869,7 @@ class PipelineOrchestrator:
             }
         else:
             return {'error': 'Analysis ID not found'}
-    
-    def _perform_yolo_detection(self, image: np.ndarray, confidence_threshold: float, max_detections: int) -> Dict[str, Any]:
-        """Perform YOLOv8 logo detection"""
-        try:
-            # Configure logo detector with YOLOv8 nano + Qwen2.5-VL-3B-Instruct
-            config = {
-                'type': 'hybrid',
-                'confidence_threshold': confidence_threshold,
-                'path': 'yolov8n.pt',  # YOLOv8 nano model
-                'use_yolo': True,  # Enable YOLOv8 nano as primary
-                'use_qwen': True,  # Enable Qwen2.5-VL-3B-Instruct as fallback
-                'qwen_model': 'Qwen/Qwen2.5-VL-3B-Instruct',
-                'qwen_api_url': 'http://localhost:8000/v1/chat/completions'
-            }
-            
-            # Create logo detector instance with config
-            logo_detector = self.logo_detector(config)
-            logo_detector.load_model()
-            
-            # Detect logos using real model
-            logo_detections = logo_detector.detect_logos(image)
-            
-            # Limit detections if needed
-            if len(logo_detections) > max_detections:
-                logo_detections = logo_detections[:max_detections]
-            
-            return {
-                'detections': logo_detections,
-                'model_info': {
-                    'name': 'YOLOv8',
-                    'confidence_threshold': confidence_threshold,
-                    'detections_found': len(logo_detections)
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"YOLOv8 detection failed: {e}")
-            # Return placeholder detection
-            return {
-                'detections': [{'bbox': [50, 50, 150, 100], 'confidence': 0.85, 'class_name': 'brand_logo'}],
-                'model_info': {'name': 'YOLOv8_fallback', 'error': str(e)}
-            }
-    
-    def _perform_llva_analysis(self, image: np.ndarray, analysis_focus: str) -> Dict[str, Any]:
-        """Perform LLVa with Ollama analysis"""
-        try:
-            # Import LLVa integration similar to CopywritingToneChecker
-            import tempfile
-            import os
-            import requests
-            import base64
-            from PIL import Image
-            import io
-            
-            # Convert numpy array to PIL Image
-            if image.dtype != 'uint8':
-                image = (image * 255).astype('uint8')
-            
-            # Convert BGR to RGB if needed
-            if len(image.shape) == 3 and image.shape[2] == 3:
-                image = image[:, :, ::-1]  # BGR to RGB
-            
-            pil_image = Image.fromarray(image)
-            
-            # Convert to base64 for Ollama API
-            buffer = io.BytesIO()
-            pil_image.save(buffer, format='JPEG')
-            image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            
-            # Prepare prompt based on analysis focus
-            if analysis_focus == 'logo_only':
-                prompt = "Analyze this image and identify any logos or brand marks. Provide their locations and confidence scores."
-            elif analysis_focus == 'context_only':
-                prompt = "Analyze the context and placement of any logos in this image. Comment on their positioning and brand compliance."
-            else:  # comprehensive
-                prompt = "Analyze this image for logos and brand marks. Identify their locations, assess their placement quality, and evaluate brand compliance. Provide detailed analysis including confidence scores and placement recommendations."
-            
-            # Call Ollama API (assuming it's running locally)
-            try:
-                # Optimize timeout: shorter for connection, longer for processing
-                response = requests.post('http://localhost:11434/api/generate', 
-                    json={
-                        'model': 'llava:latest',
-                        'prompt': prompt,
-                        'images': [image_b64],
-                        'stream': False
-                    },
-                    timeout=(10, 60)  # (connect_timeout, read_timeout)
-                )
-                
-                if response.status_code == 200:
-                    llva_response = response.json()
-                    analysis_text = llva_response.get('response', '')
-                    
-                    logger.info(f"✅ LLVa analysis successful - Response length: {len(analysis_text)} chars")
-                    
-                    # Parse LLVa response to extract structured data
-                    parsed_analysis = self._parse_llva_response(analysis_text, analysis_focus)
-                    
-                    return {
-                        'model': 'llava:latest',
-                        'analysis_focus': analysis_focus,
-                        'raw_response': analysis_text,
-                        'parsed_analysis': parsed_analysis,
-                        'success': True
-                    }
-                else:
-                    logger.error(f"❌ Ollama API error: {response.status_code} - {response.text}")
-                    return self._get_fallback_llva_analysis(analysis_focus)
-                    
-            except requests.exceptions.Timeout as e:
-                logger.error(f"⏰ Ollama request timed out: {e}")
-                return self._get_fallback_llva_analysis(analysis_focus)
-            except requests.exceptions.ConnectionError as e:
-                logger.error(f"🔌 Ollama connection error: {e}")
-                return self._get_fallback_llva_analysis(analysis_focus)
-            except requests.exceptions.RequestException as e:
-                logger.error(f"❌ Ollama request failed: {e}")
-                return self._get_fallback_llva_analysis(analysis_focus)
-            
-        except Exception as e:
-            logger.error(f"LLVa analysis failed: {e}")
-            return self._get_fallback_llva_analysis(analysis_focus)
-    
-    def _parse_llva_response(self, response_text: str, analysis_focus: str) -> Dict[str, Any]:
-        """Parse LLVa response text into structured data"""
-        try:
-            # Simple parsing logic - in production this would be more sophisticated
-            parsed = {
-                'logos_identified': [],
-                'placement_assessment': '',
-                'compliance_notes': '',
-                'confidence_score': 0.7
-            }
-            
-            # Extract key information from response text
-            if 'logo' in response_text.lower() or 'brand' in response_text.lower():
-                parsed['logos_identified'].append({
-                    'description': 'Logo identified by LLVa',
-                    'confidence': 0.8,
-                    'context': response_text[:200] + '...' if len(response_text) > 200 else response_text
-                })
-            
-            parsed['placement_assessment'] = response_text
-            parsed['compliance_notes'] = f"Analysis focused on: {analysis_focus}"
-            
-            return parsed
-            
-        except Exception as e:
-            logger.error(f"Error parsing LLVa response: {e}")
-            return {
-                'logos_identified': [],
-                'placement_assessment': 'Parsing error',
-                'compliance_notes': str(e),
-                'confidence_score': 0.0
-            }
-    
-    def _get_fallback_llva_analysis(self, analysis_focus: str) -> Dict[str, Any]:
-        """Get fallback LLVa analysis when API is unavailable"""
-        return {
-            'model': 'llava_fallback',
-            'analysis_focus': analysis_focus,
-            'raw_response': 'LLVa analysis unavailable - Ollama service not accessible',
-            'parsed_analysis': {
-                'logos_identified': [],
-                'placement_assessment': 'Service unavailable',
-                'compliance_notes': f'Fallback analysis for {analysis_focus}',
-                'confidence_score': 0.0
-            },
-            'success': False
-        }
-    
-    def _combine_yolo_llva_results(self, yolo_results: Dict[str, Any], llva_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Combine YOLOv8 and LLVa analysis results"""
-        try:
-            yolo_detections = yolo_results.get('detections', [])
-            llva_analysis = llva_results.get('parsed_analysis', {})
-            
-            # Enhance YOLOv8 detections with LLVa insights
-            enhanced_detections = []
-            for detection in yolo_detections:
-                enhanced_detection = detection.copy()
-                enhanced_detection['llva_context'] = llva_analysis.get('placement_assessment', '')
-                enhanced_detection['combined_confidence'] = (
-                    detection.get('confidence', 0.0) * 0.7 + 
-                    llva_analysis.get('confidence_score', 0.0) * 0.3
-                )
-                enhanced_detections.append(enhanced_detection)
-            
-            return {
-                'detections': enhanced_detections,
-                'yolo_count': len(yolo_detections),
-                'llva_insights': llva_analysis,
-                'combination_method': 'weighted_confidence',
-                'enhancement_applied': True
-            }
-            
-        except Exception as e:
-            logger.error(f"Error combining YOLO and LLVa results: {e}")
-            # Return YOLO results as fallback
-            return {
-                'detections': yolo_results.get('detections', []),
-                'yolo_count': len(yolo_results.get('detections', [])),
-                'llva_insights': {},
-                'combination_method': 'fallback_yolo_only',
-                'enhancement_applied': False,
-                'error': str(e)
-            }
+        
 
     def cleanup(self):
         """Cleanup resources"""

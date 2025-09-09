@@ -191,7 +191,7 @@ def start_server(host='0.0.0.0', port=5000, debug=False):
             host=host,
             port=port,
             debug=debug,
-            use_reloader=False
+            use_reloader=debug
         )
     except KeyboardInterrupt:
         print("\n🛑 Server stopped by user")

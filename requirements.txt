@@ -33,6 +33,12 @@ Flask-CORS>=3.0.10
 Werkzeug>=2.0.0
 requests>=2.25.0
 
+# FastAPI and JSON API support
+fastapi[all]>=0.111.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6  # file uploads
+aiofiles>=23.0.0  # static file serving
+
 # Visualization and Utilities
 matplotlib>=3.5.0
 seaborn>=0.11.0
@@ -48,7 +54,3 @@ flake8>=3.9.0
 mypy>=0.910
 
 
-fastapi[all]>=0.111
-uvicorn[standard]
-python-multipart   # file uploads
-aiofiles           # static file serving

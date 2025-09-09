@@ -71,8 +71,8 @@ class LogoDetectionSettings:
     max_logo_size: int = 500
     placement_rules: Dict[str, Any] = field(default_factory=dict)
     
-    # YOLOv8 nano configuration
-    yolo_model: str = "yolov8n.pt"
+    # Logo detection model configuration (fine-tuned YOLOS)
+    yolo_model: str = "ellabettison/Logo-Detection-finetune"
     use_yolo: bool = True
     
     # Qwen2.5-VL-3B-Instruct configuration via vLLM
