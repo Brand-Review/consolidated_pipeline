@@ -196,40 +196,41 @@ try:
         BrandVoiceValidator = None
     
     try:
-        # Import LogoDetector using importlib to avoid namespace conflicts
-        import importlib.util
-        logo_detector_path = os.path.join(logo_path, 'brandguard', 'core', 'detector.py')
-        if os.path.exists(logo_detector_path):
-            spec = importlib.util.spec_from_file_location("logo_detector", logo_detector_path)
-            logo_detector_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(logo_detector_module)
-            LogoDetector = logo_detector_module.LogoDetector
-            imported_models['LogoDetector'] = LogoDetector
-            print("✅ LogoDetector imported successfully using importlib")
-        else:
-            print(f"❌ LogoDetector file not found at: {logo_detector_path}")
-            LogoDetector = None
+        # Import LogoDetector directly from LogoDetector folder
+        # The logo_path should already be in sys.path from above
+        from brandguard.core.detector import LogoDetector
+        from brandguard.core.validator import LogoPlacementValidator
+        from brandguard.core.pdf_processor import PDFImageExtractor, PDFLogoDetector
+        imported_models['LogoDetector'] = LogoDetector
+        imported_models['LogoPlacementValidator'] = LogoPlacementValidator
+        imported_models['PDFImageExtractor'] = PDFImageExtractor
+        imported_models['PDFLogoDetector'] = PDFLogoDetector
+        print("✅ LogoDetector and related classes imported successfully from LogoDetector folder")
     except Exception as e:
         print(f"❌ LogoDetector import failed: {e}")
-        LogoDetector = None
+        # Try alternative import method
+        try:
+            import importlib.util
+            logo_detector_path = os.path.join(logo_path, 'brandguard', 'core', 'detector.py')
+            if os.path.exists(logo_detector_path):
+                spec = importlib.util.spec_from_file_location("logo_detector", logo_detector_path)
+                logo_detector_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(logo_detector_module)
+                LogoDetector = logo_detector_module.LogoDetector
+                imported_models['LogoDetector'] = LogoDetector
+                print("✅ LogoDetector imported successfully using importlib fallback")
+            else:
+                print(f"❌ LogoDetector file not found at: {logo_detector_path}")
+                LogoDetector = None
+        except Exception as e2:
+            print(f"❌ LogoDetector importlib fallback also failed: {e2}")
+            LogoDetector = None
+        LogoPlacementValidator = None
+        PDFImageExtractor = None
+        PDFLogoDetector = None
     
-    try:
-        # Import LogoValidator using importlib to avoid namespace conflicts
-        import importlib.util
-        logo_validator_path = os.path.join(logo_path, 'brandguard', 'core', 'validator.py')
-        if os.path.exists(logo_validator_path):
-            spec = importlib.util.spec_from_file_location("logo_validator", logo_validator_path)
-            logo_validator_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(logo_validator_module)
-            LogoValidator = logo_validator_module.LogoPlacementValidator
-            imported_models['LogoValidator'] = LogoValidator
-            print("✅ LogoValidator imported successfully using importlib")
-        else:
-            print(f"❌ LogoValidator file not found at: {logo_validator_path}")
-            LogoValidator = None
-    except Exception as e:
-        print(f"❌ LogoValidator import failed: {e}")
-        LogoValidator = None
+    # LogoValidator is now imported above as LogoPlacementValidator
+    LogoValidator = LogoPlacementValidator
     
     # Check if we have at least some models loaded
     if len(imported_models) > 0:
