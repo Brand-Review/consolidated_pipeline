@@ -1,22 +1,33 @@
 """
-Consolidated BrandGuard Pipeline API
+Author: Omer Sayem
+Date: 2025-09-09
+Version: 1.0.0
+Description: Consolidated BrandGuard Pipeline API
 Unified backend serving all four models: Color, Typography, Copywriting, and Logo Detection
 """
 
 import os
 import json
 import logging
+import multiprocessing
+import atexit
 from datetime import datetime
 from typing import Dict, Any, Optional
 from pathlib import Path
+
+# Set environment variables BEFORE importing any ML libraries
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['NUMEXPR_NUM_THREADS'] = '1'
 
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-# Import our consolidated components
 from src.brandguard.config.settings import Settings
-from src.brandguard.core.pipeline_orchestrator import PipelineOrchestrator
+from src.brandguard.core.pipeline_orchestrator_new import PipelineOrchestrator
 
 # Configure logging
 logging.basicConfig(
@@ -49,7 +60,7 @@ if settings:
         logger.error(f"Full traceback: {traceback.format_exc()}")
 
 # App configuration
-app.config['MAX_CONTENT_LENGTH'] = settings.max_file_size if settings else 50 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = settings.max_file_size if settings else 50 * 1024 * 1024 # 50MB
 app.config['UPLOAD_FOLDER'] = settings.upload_dir if settings else 'uploads'
 app.config['RESULTS_FOLDER'] = settings.results_dir if settings else 'results'
 
@@ -162,15 +173,13 @@ def analyze_content():
         else:
             return jsonify({'error': f'Unsupported input type: {input_type}'}), 400
         
-        # Get analysis options - DEBUGGING: Only logo analysis enabled
+        # Get analysis options
         analysis_options = {
-                   'analysis_priority': request.form.get('analysis_priority', 'balanced'),
-                   'report_detail': request.form.get('report_detail', 'detailed'),
-                   'include_recommendations': request.form.get('include_recommendations', 'true').lower() == 'true',
-                   
-                   # DEBUGGING: Commented out other analyses
+                    'analysis_priority': request.form.get('analysis_priority', 'balanced'),
+                    'report_detail': request.form.get('report_detail', 'detailed'), # detailed, summary, comprehensive
+                   'include_recommendations': request.form.get('include_recommendations', 'true').lower() == 'true', # true, false
                    'color_analysis': {
-                       'enabled': False,  # DEBUGGING: Disabled
+                       'enabled': request.form.get('enable_color', 'true').lower() == 'true',
                        'n_colors': int(request.form.get('color_n_colors', 8)),
                        'n_clusters': int(request.form.get('color_n_colors', 8)),
                        'color_tolerance': float(request.form.get('color_tolerance', 2.3)),
@@ -181,10 +190,11 @@ def analyze_content():
                        'accent_colors': request.form.get('accent_colors', '').strip(),
                        'primary_threshold': int(request.form.get('primary_threshold', 75)),
                        'secondary_threshold': int(request.form.get('secondary_threshold', 75)),
-                       'accent_threshold': int(request.form.get('accent_threshold', 75))
+                       'accent_threshold': int(request.form.get('accent_threshold', 75)),
+                       'forbidden_colors': request.form.get('forbidden_colors', '').strip()
                    },
                    'typography_analysis': {
-                       'enabled': False,  # DEBUGGING: Disabled
+                       'enabled': request.form.get('enable_typography', 'true').lower() == 'true',
                        'merge_regions': request.form.get('merge_regions', 'true').lower() == 'true',
                        'distance_threshold': int(request.form.get('distance_threshold', 20)),
                        'confidence_threshold': float(request.form.get('typography_confidence_threshold', 0.7)),
@@ -192,7 +202,7 @@ def analyze_content():
                        'expected_fonts': request.form.get('expected_fonts', '').strip()
                    },
                    'copywriting_analysis': {
-                       'enabled': False,  # DEBUGGING: Disabled
+                       'enabled': request.form.get('enable_copywriting', 'true').lower() == 'true',
                        'include_suggestions': True,
                        'include_industry_benchmarks': True,
                        'enable_brand_profile_matching': True,
@@ -202,7 +212,7 @@ def analyze_content():
                        'energy_score': int(request.form.get('energy_score', 50))
                    },
                    'logo_analysis': {
-                       'enabled': True,  # DEBUGGING: Only logo analysis enabled
+                       'enabled': request.form.get('enable_logo', 'true').lower() == 'true',
                        'enable_placement_validation': request.form.get('enable_placement_validation', 'true').lower() == 'true',
                        'enable_brand_compliance': True,
                        'generate_annotations': request.form.get('generate_annotations', 'true').lower() == 'true',
@@ -219,25 +229,8 @@ def analyze_content():
                        'pass_threshold': float(request.form.get('pass_threshold', 0.7)),
                        'warning_threshold': float(request.form.get('warning_threshold', 0.5)),
                        'critical_threshold': float(request.form.get('critical_threshold', 0.3)),
-                   #    # LLVa with Ollama integration
-                   #    'enable_llva_ollama': request.form.get('enable_llva_ollama', 'false').lower() == 'true',
-                   #    'llva_analysis_focus': request.form.get('llva_analysis_focus', 'comprehensive')
                    }
                }
-        
-        # Get brand voice settings if provided
-        brand_voice_settings = {}
-        if request.form.get('formality_score'):
-            brand_voice_settings['formality_score'] = int(request.form.get('formality_score'))
-        if request.form.get('confidence_level'):
-            brand_voice_settings['confidence_level'] = request.form.get('confidence_level')
-        if request.form.get('warmth_score'):
-            brand_voice_settings['warmth_score'] = int(request.form.get('warmth_score'))
-        if request.form.get('energy_score'):
-            brand_voice_settings['energy_score'] = int(request.form.get('energy_score'))
-        
-        if brand_voice_settings:
-            analysis_options['brand_voice_settings'] = brand_voice_settings
         
         # Perform comprehensive analysis
         logger.info(f"Starting analysis for {source_type}: {input_source}")
@@ -256,7 +249,7 @@ def analyze_content():
             try:
                 os.remove(filepath)
             except:
-                pass  # Don't fail if cleanup fails
+                pass 
         
         return jsonify({
             'success': True,
@@ -655,6 +648,36 @@ def internal_error(e):
     """Handle internal server errors"""
     return jsonify({'error': 'Internal server error'}), 500
 
+def cleanup_resources():
+    """Clean up all resources to prevent semaphore leaks"""
+    try:
+        logger.info("Cleaning up resources...")
+        
+        # Clean up pipeline
+        if pipeline:
+            pipeline.cleanup()
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+        # Clean up multiprocessing resources
+        try:
+            multiprocessing.active_children()
+            for process in multiprocessing.active_children():
+                process.terminate()
+                process.join(timeout=5)
+        except Exception as e:
+            logger.warning(f"Error cleaning up multiprocessing: {e}")
+        
+        logger.info("Resource cleanup completed")
+        
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
+
+# Register cleanup function
+atexit.register(cleanup_resources)
+
 if __name__ == '__main__':
     import signal
     import sys
@@ -663,8 +686,7 @@ if __name__ == '__main__':
         """Handle shutdown signals gracefully"""
         logger.info("Shutdown signal received, cleaning up...")
         try:
-            if pipeline:
-                pipeline.cleanup()
+            cleanup_resources()
             sys.exit(0)
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
@@ -680,17 +702,20 @@ if __name__ == '__main__':
         logger.info(f"📁 Results directory: {app.config['RESULTS_FOLDER']}")
         logger.info(f"🔧 Pipeline ready: {pipeline is not None}")
         
-        # Run the Flask app
+        # Run the Flask app with multiprocessing disabled
         app.run(
-            debug=True,
+            debug=False,  # Disable debug mode to prevent reloader issues
             host='0.0.0.0',
             port=5003,
             threaded=True,
-            use_reloader=True
+            use_reloader=True,  # Disable reloader to prevent multiprocessing issues
+            processes=1  # Single process to avoid multiprocessing conflicts
         )
         
     except KeyboardInterrupt:
         logger.info("App stopped by user")
+        cleanup_resources()
     except Exception as e:
         logger.error(f"App crashed: {e}")
+        cleanup_resources()
         sys.exit(1)

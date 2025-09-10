@@ -1,4 +1,7 @@
 """
+Author: Omer Sayem
+Date: 2025-09-09
+Version: 1.0.0
 Consolidated configuration settings for BrandGuard Pipeline
 Combines settings from all four models: Color, Typography, Copywriting, and Logo Detection
 """
@@ -85,11 +88,6 @@ class LogoDetectionSettings:
     combine_detections: bool = True
     enhance_yolo_with_qwen: bool = True
     
-    # LLVa with Ollama integration (legacy)
-    enable_llva_ollama: bool = False
-    llva_analysis_focus: str = "comprehensive"  # comprehensive, logo_only, context_only
-    llva_model: str = "llava-1.5"
-    llva_confidence_threshold: float = 0.7
 
 @dataclass
 class AnalysisSettings:
