@@ -18,6 +18,7 @@ import json
 
 # Import individual model components
 from ..config.settings import Settings, BrandColorPalette, TypographyRules, BrandVoiceSettings, LogoDetectionSettings
+from .typography_analyzer import TypographyAnalyzer
 
 # Import real working models
 try:
@@ -260,8 +261,9 @@ class PipelineOrchestrator:
     Main orchestrator that coordinates all BrandGuard models
     """
     
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, lang: str = 'en'):
         self.settings = settings
+        self.lang = lang
         self.analysis_results = {}
         self.current_analysis_id = None
         
@@ -325,6 +327,14 @@ class PipelineOrchestrator:
                 logger.info("✅ TypographyValidator initialized with real model")
             else:
                 logger.warning("⚠️ TypographyValidator not available, using fallback")
+            
+            # Initialize TypographyAnalyzer with FontComplianceChecker integration
+            self.typography_analyzer = TypographyAnalyzer(
+                settings=self.settings,
+                imported_models=imported_models,
+                lang=self.lang
+            )
+            logger.info(f"✅ TypographyAnalyzer initialized with language: {self.lang}")
             
             # Initialize copywriting analysis components (only if imported successfully)
             if ToneAnalyzer is not None:
@@ -399,6 +409,16 @@ class PipelineOrchestrator:
         """Initialize fallback/placeholder models"""
         logger.warning("Using fallback model implementations")
         # These will use the placeholder methods below
+    
+    def update_language(self, lang: str):
+        """Update the OCR language for typography analysis"""
+        try:
+            self.lang = lang
+            if hasattr(self, 'typography_analyzer'):
+                self.typography_analyzer.update_language(lang)
+                logger.info(f"Updated pipeline language to: {lang}")
+        except Exception as e:
+            logger.error(f"Failed to update pipeline language: {e}")
     
     def analyze_content(self, 
                        input_source: str, 
@@ -677,7 +697,7 @@ class PipelineOrchestrator:
             return {'error': f'Color analysis failed: {str(e)}', 'compliance_score': 0.0}
     
     def _perform_typography_analysis(self, image: np.ndarray, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Perform typography analysis using FontTypographyChecker"""
+        """Perform typography analysis using TypographyAnalyzer with FontComplianceChecker"""
         try:
             # Check if typography analysis is enabled
             if options and not options.get('enabled', True):
@@ -688,87 +708,48 @@ class PipelineOrchestrator:
             merge_regions = options.get('merge_regions', True) if options else True
             distance_threshold = options.get('distance_threshold', 20) if options else 20
             expected_fonts = options.get('expected_fonts', '') if options else ''
+            lang = options.get('lang', self.lang) if options else self.lang
             
-            if MODELS_LOADED and hasattr(self, 'text_extractor') and hasattr(self, 'font_identifier'):
-                # Use real models
+            # Update language if different
+            if hasattr(self, 'typography_analyzer') and lang != self.lang:
+                self.typography_analyzer.update_language(lang)
+                self.lang = lang
+            
+            # Use TypographyAnalyzer for comprehensive analysis
+            if hasattr(self, 'typography_analyzer'):
                 try:
-                    # Extract text regions using real model
-                    text_regions = self.text_extractor.extract_text_regions(image)
+                    # Perform comprehensive typography analysis
+                    analysis_results = self.typography_analyzer.analyze_typography(image)
                     
-                    # Identify fonts using real model
-                    font_analysis = []
-                    for region in text_regions:
-                        if 'text' in region and region['text'].strip():
-                            try:
-                                # FontIdentifier expects image and text region
-                                bbox = region.get('bbox', [])
-                                if bbox and len(bbox) == 4:
-                                    # Extract the text region from the image
-                                    x1, y1, x2, y2 = bbox
-                                    # Ensure coordinates are within image bounds
-                                    x1 = max(0, int(x1))
-                                    y1 = max(0, int(y1))
-                                    x2 = min(image.shape[1], int(x2))
-                                    y2 = min(image.shape[0], int(y2))
-                                    
-                                    # Check if region is valid
-                                    if x2 > x1 and y2 > y1:
-                                        text_image = image[y1:y2, x1:x2]
-                                        # Check if text_image is not empty
-                                        if text_image.size > 0:
-                                            # Identify font using the text region image
-                                            font_info = self.font_identifier.identify_font(text_image, bbox)
-                                        else:
-                                            # Empty region, use fallback
-                                            font_info = {'font_family': 'Unknown', 'font_size': 12, 'confidence': 0.0}
-                                    else:
-                                        # Invalid region, use fallback
-                                        font_info = {'font_family': 'Unknown', 'font_size': 12, 'confidence': 0.0}
-                                else:
-                                    # Fallback: use the entire image
-                                    font_info = self.font_identifier.identify_font(image)
-                                
-                                font_analysis.append({
-                                    'text': region['text'],
-                                    'font_family': font_info.get('font_family', 'Unknown'),
-                                    'font_size': font_info.get('font_size', 12),
-                                    'confidence': font_info.get('confidence', 0.0),
-                                    'bbox': region.get('bbox', []),
-                                    'approved': True  # Will be validated later
-                                })
-                            except Exception as e:
-                                logger.error(f"Font identification failed for region: {e}")
-                                # Add fallback font info
-                                font_analysis.append({
-                                    'text': region['text'],
-                                    'font_family': 'Unknown',
-                                    'font_size': 12,
-                                    'confidence': 0.0,
-                                    'bbox': region.get('bbox', []),
-                                    'approved': True
-                                })
+                    # Convert results to expected format
+                    text_regions = analysis_results.get('text_regions', [])
+                    font_analysis = analysis_results.get('fonts_detected', [])
+                    typography_validation = analysis_results.get('font_compliance', {})
+                    overall_compliance = analysis_results.get('overall_compliance', {})
                     
-                    # Validate typography compliance
-                    typography_validation = self._validate_typography_compliance_real(font_analysis, expected_fonts)
-                    
-                    compliance_score = typography_validation.get('compliance_score', 0.0)
+                    # Calculate compliance score
+                    compliance_score = analysis_results.get('typography_score', 0.0)
                     
                     return {
                         'text_regions': text_regions,
                         'font_analysis': font_analysis,
                         'typography_validation': typography_validation,
+                        'overall_compliance': overall_compliance,
                         'analysis_settings': {
                             'confidence_threshold': confidence_threshold,
                             'merge_regions': merge_regions,
                             'distance_threshold': distance_threshold,
                             'expected_fonts': expected_fonts,
-                            'model_used': 'real_FontTypographyChecker'
+                            'lang': lang,
+                            'model_used': 'TypographyAnalyzer_with_FontComplianceChecker'
                         },
-                        'compliance_score': compliance_score
+                        'compliance_score': compliance_score,
+                        'recommendations': analysis_results.get('recommendations', []),
+                        'errors': analysis_results.get('errors', [])
                     }
                     
                 except Exception as e:
-                    logger.error(f"Real typography analysis failed: {e}, falling back to placeholder")
+                    logger.error(f"TypographyAnalyzer analysis failed: {e}, falling back to placeholder")
                     # Fall back to placeholder implementation
                     pass
             
@@ -786,29 +767,7 @@ class PipelineOrchestrator:
                     'merge_regions': merge_regions,
                     'distance_threshold': distance_threshold,
                     'expected_fonts': expected_fonts,
-                    'model_used': 'fallback_placeholder'
-                },
-                'compliance_score': typography_validation.get('compliance_score', 0.0)
-            }
-            
-        except Exception as e:
-            logger.error(f"Typography analysis failed: {e}")
-            return {'error': f'Typography analysis failed: {str(e)}'}
-            
-            # Fallback to placeholder implementation
-            text_regions = self._extract_text_regions(image)
-            font_analysis = self._identify_fonts(text_regions)
-            typography_validation = self._validate_typography_compliance(font_analysis)
-            
-            return {
-                'text_regions': text_regions,
-                'font_analysis': font_analysis,
-                'typography_validation': typography_validation,
-                'analysis_settings': {
-                    'confidence_threshold': confidence_threshold,
-                    'merge_regions': merge_regions,
-                    'distance_threshold': distance_threshold,
-                    'expected_fonts': expected_fonts,
+                    'lang': lang,
                     'model_used': 'fallback_placeholder'
                 },
                 'compliance_score': typography_validation.get('compliance_score', 0.0)

@@ -143,7 +143,7 @@ class BasePipelineOrchestrator:
                 logo_options = analysis_options.get('logo_analysis', {})
                 model_results['logo_analysis'] = self.logo_analyzer.analyze_logos(image, logo_options)
             
-            # # Perform typography analysis if enabled
+            # Perform typography analysis if enabled
             # if analysis_options and analysis_options.get('typography_analysis', {}).get('enabled', True):
             #     typography_options = analysis_options.get('typography_analysis', {})
             #     # Typography analyzer expects (image, text_regions) not (image, options)

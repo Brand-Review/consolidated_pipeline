@@ -1,9 +1,11 @@
 """
 Typography Analysis Module
-Handles font identification and typography validation
+Handles font identification and typography validation using FontComplianceChecker
 """
 
 import logging
+import os
+import tempfile
 from typing import Dict, Any, List, Optional, Tuple
 import cv2
 import numpy as np
@@ -12,14 +14,14 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 
 class TypographyAnalyzer:
-    """Handles typography analysis including font identification and validation"""
+    """Handles typography analysis using FontComplianceChecker from FontTypographyChecker"""
     
-    def __init__(self, settings, imported_models: Dict[str, Any]):
+    def __init__(self, settings, imported_models: Dict[str, Any], lang: str = 'en'):
         """Initialize the typography analyzer"""
         self.settings = settings
         self.imported_models = imported_models
-        self.font_identifier = None
-        self.typography_validator = None
+        self.lang = lang
+        self.font_compliance_checker = None
         
         # Initialize components
         self._initialize_components()
@@ -27,30 +29,31 @@ class TypographyAnalyzer:
     def _initialize_components(self):
         """Initialize typography analysis components"""
         try:
-            # Get FontIdentifier from imported models
-            if 'FontIdentifier' in self.imported_models and self.imported_models['FontIdentifier']:
-                self.font_identifier = self.imported_models['FontIdentifier']()
-                logger.info("✅ FontIdentifier initialized with real model")
+            # Try to get FontComplianceChecker from imported models
+            if 'FontComplianceChecker' in self.imported_models and self.imported_models['FontComplianceChecker']:
+                try:
+                    FontComplianceChecker = self.imported_models['FontComplianceChecker']
+                    self.font_compliance_checker = FontComplianceChecker(
+                        use_gpu=False, 
+                        lang=self.lang
+                    )
+                    logger.info(f"✅ FontComplianceChecker initialized with language: {self.lang}")
+                except Exception as e:
+                    logger.warning(f"⚠️ FontComplianceChecker initialization failed: {e}, using fallback")
+                    self.font_compliance_checker = None
             else:
-                logger.warning("⚠️ FontIdentifier not available, using fallback")
-                self.font_identifier = None
-            
-            # Get TypographyValidator from imported models
-            if 'TypographyValidator' in self.imported_models and self.imported_models['TypographyValidator']:
-                self.typography_validator = self.imported_models['TypographyValidator']()
-                logger.info("✅ TypographyValidator initialized with real model")
-            else:
-                logger.warning("⚠️ TypographyValidator not available, using fallback")
-                self.typography_validator = None
+                logger.warning("⚠️ FontComplianceChecker not available, using fallback")
+                self.font_compliance_checker = None
                 
         except Exception as e:
             logger.error(f"Typography analysis initialization failed: {e}")
             import traceback
             logger.error(f"Typography initialization traceback: {traceback.format_exc()}")
+            self.font_compliance_checker = None
     
     def analyze_typography(self, image: np.ndarray, text_regions: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """
-        Perform comprehensive typography analysis
+        Perform comprehensive typography analysis using FontComplianceChecker
         
         Args:
             image: Input image as numpy array
@@ -62,33 +65,12 @@ class TypographyAnalyzer:
         try:
             logger.info("🔍 Starting typography analysis...")
             
-            # Initialize results
-            results = {
-                'fonts_detected': [],
-                'font_compliance': {},
-                'typography_score': 0.0,
-                'recommendations': [],
-                'errors': []
-            }
-            
-            # Detect fonts in the image
-            fonts_detected = self._detect_fonts(image, text_regions)
-            results['fonts_detected'] = fonts_detected
-            
-            # Validate typography against brand rules
-            compliance_results = self._validate_typography(fonts_detected)
-            results['font_compliance'] = compliance_results
-            
-            # Calculate overall typography score
-            typography_score = self._calculate_typography_score(compliance_results)
-            results['typography_score'] = typography_score
-            
-            # Generate recommendations
-            recommendations = self._generate_typography_recommendations(compliance_results)
-            results['recommendations'] = recommendations
-            
-            logger.info(f"✅ Typography analysis completed. Score: {typography_score:.2f}")
-            return results
+            if self.font_compliance_checker:
+                # Use FontComplianceChecker for comprehensive analysis
+                return self._analyze_with_font_compliance_checker(image)
+            else:
+                # Fallback to basic analysis
+                return self._fallback_typography_analysis(image, text_regions)
             
         except Exception as e:
             logger.error(f"Typography analysis failed: {e}")
@@ -102,45 +84,161 @@ class TypographyAnalyzer:
                 'errors': [str(e)]
             }
     
-    def _detect_fonts(self, image: np.ndarray, text_regions: Optional[List[Dict]] = None) -> List[Dict[str, Any]]:
-        """Detect fonts in the image"""
+    def _analyze_with_font_compliance_checker(self, image: np.ndarray) -> Dict[str, Any]:
+        """Analyze typography using FontComplianceChecker"""
         try:
-            fonts_detected = []
-            
-            if self.font_identifier:
-                # Use real font identifier
-                if text_regions:
-                    for region in text_regions:
-                        # Extract image region if region contains bbox
-                        if 'bbox' in region:
-                            x1, y1, x2, y2 = region['bbox']
-                            region_image = image[y1:y2, x1:x2]
-                            if region_image.size > 0:  # Check if region is valid
-                                font_info = self.font_identifier.identify_font(region_image)
-                                if font_info:
-                                    fonts_detected.append(font_info)
-                        else:
-                            # If region is already image data
-                            font_info = self.font_identifier.identify_font(region)
-                            if font_info:
-                                fonts_detected.append(font_info)
+            # Save image to temporary file for FontComplianceChecker
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
+                # Convert numpy array to PIL Image and save
+                if len(image.shape) == 3 and image.shape[2] == 3:
+                    # BGR to RGB conversion
+                    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                    pil_image = Image.fromarray(image_rgb)
                 else:
-                    # Detect fonts in entire image
-                    font_info = self.font_identifier.identify_font(image)
-                    if font_info:
-                        fonts_detected.append(font_info)
-            else:
-                # Fallback: basic font detection
-                fonts_detected = self._fallback_font_detection(image)
+                    pil_image = Image.fromarray(image)
+                
+                pil_image.save(tmp_file.name, 'JPEG')
+                tmp_file_path = tmp_file.name
             
-            return fonts_detected
+            # Analyze with FontComplianceChecker
+            analysis_results = self.font_compliance_checker.analyze_image(
+                tmp_file_path,
+                merge_nearby_regions=True,
+                distance_threshold=20
+            )
+            
+            # Clean up temporary file
+            try:
+                os.unlink(tmp_file_path)
+            except:
+                pass
+            
+            # Convert FontComplianceChecker results to our format
+            return self._convert_font_compliance_results(analysis_results)
             
         except Exception as e:
-            logger.error(f"Font detection failed: {e}")
-            return []
+            logger.error(f"FontComplianceChecker analysis failed: {e}")
+            return self._fallback_typography_analysis(image, None)
+    
+    def _convert_font_compliance_results(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert FontComplianceChecker results to our format"""
+        try:
+            # Extract text regions and font analysis
+            text_regions = analysis_results.get('text_regions', [])
+            font_analysis = analysis_results.get('font_analysis', {})
+            typography_validation = analysis_results.get('typography_validation', {})
+            overall_compliance = analysis_results.get('overall_compliance', {})
+            
+            # Convert text regions to fonts_detected format
+            fonts_detected = []
+            for region in text_regions:
+                font_info = {
+                    'font_family': region.get('font_name', 'Unknown'),
+                    'font_size': region.get('font_metrics', {}).get('font_size', 12),
+                    'confidence': region.get('font_confidence', 0.5),
+                    'text': region.get('text', ''),
+                    'bbox': region.get('bbox', [0, 0, 0, 0]),
+                    'area': region.get('area', 0),
+                    'font_approved': region.get('font_approved', False)
+                }
+                fonts_detected.append(font_info)
+            
+            # Convert compliance results
+            font_compliance = {
+                'approved_fonts': [f for f in fonts_detected if f.get('font_approved', False)],
+                'non_compliant_fonts': [f for f in fonts_detected if not f.get('font_approved', False)],
+                'compliance_score': font_analysis.get('compliance_score', 0.0)
+            }
+            
+            # Calculate typography score
+            typography_score = overall_compliance.get('overall_score', 0.0)
+            
+            # Generate recommendations
+            recommendations = overall_compliance.get('recommendations', [])
+            if not recommendations:
+                recommendations = self._generate_basic_recommendations(font_compliance)
+            
+            return {
+                'fonts_detected': fonts_detected,
+                'font_compliance': font_compliance,
+                'typography_score': typography_score,
+                'recommendations': recommendations,
+                'errors': [],
+                'text_regions': text_regions,
+                'font_analysis': font_analysis,
+                'typography_validation': typography_validation,
+                'overall_compliance': overall_compliance
+            }
+            
+        except Exception as e:
+            logger.error(f"Error converting FontComplianceChecker results: {e}")
+            return {
+                'fonts_detected': [],
+                'font_compliance': {},
+                'typography_score': 0.0,
+                'recommendations': ['Error processing typography results'],
+                'errors': [str(e)]
+            }
+    
+    def _fallback_typography_analysis(self, image: np.ndarray, text_regions: Optional[List[Dict]] = None) -> Dict[str, Any]:
+        """Fallback typography analysis when FontComplianceChecker is not available"""
+        try:
+            logger.info("Using fallback typography analysis")
+            
+            # Basic fallback analysis
+            fonts_detected = self._fallback_font_detection(image)
+            compliance_results = self._fallback_typography_validation(fonts_detected)
+            typography_score = self._calculate_typography_score(compliance_results)
+            recommendations = self._generate_typography_recommendations(compliance_results)
+            
+            return {
+                'fonts_detected': fonts_detected,
+                'font_compliance': compliance_results,
+                'typography_score': typography_score,
+                'recommendations': recommendations,
+                'errors': ['Using fallback typography analysis - FontComplianceChecker not available']
+            }
+            
+        except Exception as e:
+            logger.error(f"Fallback typography analysis failed: {e}")
+            return {
+                'fonts_detected': [],
+                'font_compliance': {},
+                'typography_score': 0.0,
+                'recommendations': ['Typography analysis failed'],
+                'errors': [str(e)]
+            }
+    
+    def _generate_basic_recommendations(self, font_compliance: Dict[str, Any]) -> List[str]:
+        """Generate basic recommendations from font compliance data"""
+        recommendations = []
+        
+        non_compliant_fonts = font_compliance.get('non_compliant_fonts', [])
+        approved_fonts = font_compliance.get('approved_fonts', [])
+        
+        if non_compliant_fonts:
+            recommendations.append(f"Replace {len(non_compliant_fonts)} non-compliant fonts with brand-approved alternatives")
+        
+        if not approved_fonts:
+            recommendations.append("Use brand-approved fonts for better consistency")
+        
+        if font_compliance.get('compliance_score', 0.0) < 0.8:
+            recommendations.append("Improve typography compliance to meet brand standards")
+        
+        return recommendations
+    
+    def update_language(self, lang: str):
+        """Update the OCR language for text extraction"""
+        try:
+            self.lang = lang
+            if self.font_compliance_checker:
+                self.font_compliance_checker.update_ocr_language(lang)
+                logger.info(f"Updated OCR language to: {lang}")
+        except Exception as e:
+            logger.error(f"Failed to update OCR language: {e}")
     
     def _validate_typography(self, fonts_detected: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Validate typography against brand rules"""
+        """Validate typography against brand rules (fallback method)"""
         try:
             compliance_results = {
                 'approved_fonts': [],
@@ -148,25 +246,9 @@ class TypographyAnalyzer:
                 'compliance_score': 0.0
             }
             
-            if self.typography_validator and fonts_detected:
-                # Use real typography validator
-                for font_info in fonts_detected:
-                    # Use validate_font_family method instead of validate_font
-                    font_name = font_info.get('font_family', 'Unknown')
-                    validation_result = self.typography_validator.validate_font_family(font_name)
-                    is_compliant = validation_result.get('is_compliant', False)
-                    if is_compliant:
-                        compliance_results['approved_fonts'].append(font_info)
-                    else:
-                        compliance_results['non_compliant_fonts'].append(font_info)
-                
-                # Calculate compliance score
-                total_fonts = len(fonts_detected)
-                approved_fonts = len(compliance_results['approved_fonts'])
-                compliance_results['compliance_score'] = approved_fonts / total_fonts if total_fonts > 0 else 0.0
-            else:
-                # Fallback validation
-                compliance_results = self._fallback_typography_validation(fonts_detected)
+            # Basic validation - mark all as non-compliant for fallback
+            compliance_results['non_compliant_fonts'] = fonts_detected
+            compliance_results['compliance_score'] = 0.5  # Neutral score for fallback
             
             return compliance_results
             
@@ -260,18 +342,11 @@ class TypographyAnalyzer:
         try:
             logger.info("Cleaning up typography analyzer...")
             
-            # Clear model references
-            if hasattr(self, 'font_detector') and self.font_detector:
-                if hasattr(self.font_detector, 'cleanup'):
-                    self.font_detector.cleanup()
-                del self.font_detector
-                self.font_detector = None
-            
-            if hasattr(self, 'font_validator') and self.font_validator:
-                if hasattr(self.font_validator, 'cleanup'):
-                    self.font_validator.cleanup()
-                del self.font_validator
-                self.font_validator = None
+            # Clear FontComplianceChecker reference
+            if hasattr(self, 'font_compliance_checker') and self.font_compliance_checker:
+                # FontComplianceChecker doesn't have a cleanup method, just clear the reference
+                del self.font_compliance_checker
+                self.font_compliance_checker = None
             
             # Force garbage collection
             import gc

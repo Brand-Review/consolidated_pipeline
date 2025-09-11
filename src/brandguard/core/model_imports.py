@@ -92,6 +92,52 @@ def import_all_models():
             print(f"❌ TypographyValidator import failed: {e}")
             TypographyValidator = None
         
+        # Import FontComplianceChecker (main orchestrator)
+        try:
+            import importlib.util
+            
+            font_compliance_path = os.path.join(typography_path, 'brandguard', 'core', 'font_compliance.py')
+            if os.path.exists(font_compliance_path):
+                # Import the module with proper path handling
+                spec = importlib.util.spec_from_file_location("font_compliance", font_compliance_path)
+                font_compliance_module = importlib.util.module_from_spec(spec)
+                
+                # Set up the module's __package__ attribute to avoid relative import issues
+                font_compliance_module.__package__ = 'brandguard.core'
+                
+                spec.loader.exec_module(font_compliance_module)
+                FontComplianceChecker = font_compliance_module.FontComplianceChecker
+                imported_models['FontComplianceChecker'] = FontComplianceChecker
+                print("✅ FontComplianceChecker imported successfully using importlib")
+            else:
+                print(f"❌ FontComplianceChecker file not found at: {font_compliance_path}")
+                FontComplianceChecker = None
+        except Exception as e:
+            print(f"❌ FontComplianceChecker import failed: {e}")
+            FontComplianceChecker = None
+        
+        # Import TextExtractor (PaddleOCR integration)
+        try:
+            import importlib.util
+            text_extractor_path = os.path.join(typography_path, 'brandguard', 'core', 'text_extractor.py')
+            if os.path.exists(text_extractor_path):
+                spec = importlib.util.spec_from_file_location("text_extractor", text_extractor_path)
+                text_extractor_module = importlib.util.module_from_spec(spec)
+                
+                # Set up the module's __package__ attribute to avoid relative import issues
+                text_extractor_module.__package__ = 'brandguard.core'
+                
+                spec.loader.exec_module(text_extractor_module)
+                TextExtractor = text_extractor_module.TextExtractor
+                imported_models['TextExtractor'] = TextExtractor
+                print("✅ TextExtractor imported successfully using importlib")
+            else:
+                print(f"❌ TextExtractor file not found at: {text_extractor_path}")
+                TextExtractor = None
+        except Exception as e:
+            print(f"❌ TextExtractor import failed: {e}")
+            TextExtractor = None
+        
         # Import Copywriting Analysis components using importlib
         try:
             import importlib.util
