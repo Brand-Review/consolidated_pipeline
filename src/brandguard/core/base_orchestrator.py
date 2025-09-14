@@ -144,15 +144,15 @@ class BasePipelineOrchestrator:
                 model_results['logo_analysis'] = self.logo_analyzer.analyze_logos(image, logo_options)
             
             # Perform typography analysis if enabled
-            # if analysis_options and analysis_options.get('typography_analysis', {}).get('enabled', True):
-            #     typography_options = analysis_options.get('typography_analysis', {})
-            #     # Typography analyzer expects (image, text_regions) not (image, options)
-            #     model_results['typography_analysis'] = self.typography_analyzer.analyze_typography(image, None)
+            if analysis_options and analysis_options.get('typography_analysis', {}).get('enabled', True):
+                typography_options = analysis_options.get('typography_analysis', {})
+                # Typography analyzer expects (image, text_regions) not (image, options)
+                model_results['typography_analysis'] = self.typography_analyzer.analyze_typography(image, None)
             
-            # # Perform copywriting analysis if enabled
-            # if analysis_options and analysis_options.get('copywriting_analysis', {}).get('enabled', True):
-            #     copywriting_options = analysis_options.get('copywriting_analysis', {})
-            #     model_results['copywriting_analysis'] = self.copywriting_analyzer.analyze_copywriting(image, copywriting_options)
+            # Perform copywriting analysis if enabled
+            if analysis_options and analysis_options.get('copywriting_analysis', {}).get('enabled', True):
+                copywriting_options = analysis_options.get('copywriting_analysis', {})
+                model_results['copywriting_analysis'] = self.copywriting_analyzer.analyze_copywriting(image, copywriting_options)
             
             return {
                 'model_results': model_results,

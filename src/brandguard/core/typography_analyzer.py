@@ -34,7 +34,7 @@ class TypographyAnalyzer:
                 try:
                     FontComplianceChecker = self.imported_models['FontComplianceChecker']
                     self.font_compliance_checker = FontComplianceChecker(
-                        use_gpu=False, 
+                        use_gpu=False,
                         lang=self.lang
                     )
                     logger.info(f"✅ FontComplianceChecker initialized with language: {self.lang}")

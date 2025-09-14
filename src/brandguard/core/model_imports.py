@@ -1,4 +1,8 @@
 """
+Author: Omer Sayem
+Date: 2025-09-14
+Version: 1.0.0
+Description:
 Model Imports and Initialization
 Handles importing and initializing all BrandGuard models
 """
@@ -18,6 +22,7 @@ def import_all_models():
     """Import all available models from individual modules"""
     global MODELS_LOADED, imported_models
     
+    print("🚀 Starting import_all_models...")
     try:
         # Get the parent directory (one level up from consolidated_pipeline)
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -97,6 +102,7 @@ def import_all_models():
             import importlib.util
             
             font_compliance_path = os.path.join(typography_path, 'brandguard', 'core', 'font_compliance.py')
+
             if os.path.exists(font_compliance_path):
                 # Import the module with proper path handling
                 spec = importlib.util.spec_from_file_location("font_compliance", font_compliance_path)
@@ -106,8 +112,12 @@ def import_all_models():
                 font_compliance_module.__package__ = 'brandguard.core'
                 
                 spec.loader.exec_module(font_compliance_module)
+
                 FontComplianceChecker = font_compliance_module.FontComplianceChecker
+
                 imported_models['FontComplianceChecker'] = FontComplianceChecker
+
+                
                 print("✅ FontComplianceChecker imported successfully using importlib")
             else:
                 print(f"❌ FontComplianceChecker file not found at: {font_compliance_path}")
@@ -138,40 +148,23 @@ def import_all_models():
             print(f"❌ TextExtractor import failed: {e}")
             TextExtractor = None
         
-        # Import Copywriting Analysis components using importlib
+        # Import VLLMToneAnalyzer (new VLLM-based approach)
         try:
             import importlib.util
-            tone_analyzer_path = os.path.join(copywriting_path, 'brandguard', 'core', 'tone_analyzer.py')
-            if os.path.exists(tone_analyzer_path):
-                spec = importlib.util.spec_from_file_location("tone_analyzer", tone_analyzer_path)
-                tone_analyzer_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(tone_analyzer_module)
-                ToneAnalyzer = tone_analyzer_module.ToneAnalyzer
-                imported_models['ToneAnalyzer'] = ToneAnalyzer
-                print("✅ ToneAnalyzer imported successfully using importlib")
+            vllm_analyzer_path = os.path.join(copywriting_path, 'brandguard', 'core', 'vllm_analyzer.py')
+            if os.path.exists(vllm_analyzer_path):
+                spec = importlib.util.spec_from_file_location("vllm_analyzer", vllm_analyzer_path)
+                vllm_analyzer_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(vllm_analyzer_module)
+                VLLMToneAnalyzer = vllm_analyzer_module.VLLMToneAnalyzer
+                imported_models['VLLMToneAnalyzer'] = VLLMToneAnalyzer
+                print("✅ VLLMToneAnalyzer imported successfully using importlib")
             else:
-                print(f"❌ ToneAnalyzer file not found at: {tone_analyzer_path}")
-                ToneAnalyzer = None
+                print(f"❌ VLLMToneAnalyzer file not found at: {vllm_analyzer_path}")
+                VLLMToneAnalyzer = None
         except Exception as e:
-            print(f"❌ ToneAnalyzer import failed: {e}")
-            ToneAnalyzer = None
-        
-        try:
-            import importlib.util
-            brand_voice_validator_path = os.path.join(copywriting_path, 'brandguard', 'core', 'brand_voice_validator.py')
-            if os.path.exists(brand_voice_validator_path):
-                spec = importlib.util.spec_from_file_location("brand_voice_validator", brand_voice_validator_path)
-                brand_voice_validator_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(brand_voice_validator_module)
-                BrandVoiceValidator = brand_voice_validator_module.BrandVoiceValidator
-                imported_models['BrandVoiceValidator'] = BrandVoiceValidator
-                print("✅ BrandVoiceValidator imported successfully using importlib")
-            else:
-                print(f"❌ BrandVoiceValidator file not found at: {brand_voice_validator_path}")
-                BrandVoiceValidator = None
-        except Exception as e:
-            print(f"❌ BrandVoiceValidator import failed: {e}")
-            BrandVoiceValidator = None
+            print(f"❌ VLLMToneAnalyzer import failed: {e}")
+            VLLMToneAnalyzer = None
         
         # Import Logo Detection components using importlib
         try:
@@ -251,6 +244,9 @@ def import_all_models():
 
 def get_imported_models():
     """Get the dictionary of imported models"""
+    global MODELS_LOADED
+    if not MODELS_LOADED:
+        import_all_models()
     return imported_models
 
 def is_models_loaded():

@@ -18,6 +18,7 @@ class CopywritingAnalyzer:
         """Initialize the copywriting analyzer"""
         self.settings = settings
         self.imported_models = imported_models
+        self.vllm_analyzer = None
         self.tone_analyzer = None
         self.brand_voice_validator = None
         
@@ -27,26 +28,49 @@ class CopywritingAnalyzer:
     def _initialize_components(self):
         """Initialize copywriting analysis components"""
         try:
-            # Get ToneAnalyzer from imported models
-            if 'ToneAnalyzer' in self.imported_models and self.imported_models['ToneAnalyzer']:
-                self.tone_analyzer = self.imported_models['ToneAnalyzer']()
-                logger.info("✅ ToneAnalyzer initialized with real model")
+            # Prioritize VLLMToneAnalyzer (new VLLM-based approach)
+            if 'VLLMToneAnalyzer' in self.imported_models and self.imported_models['VLLMToneAnalyzer']:
+                self.vllm_analyzer = self.imported_models['VLLMToneAnalyzer']()
+                logger.info("✅ VLLMToneAnalyzer initialized with real model")
             else:
-                logger.warning("⚠️ ToneAnalyzer not available, using fallback")
-                self.tone_analyzer = None
+                logger.warning("⚠️ VLLMToneAnalyzer not available, trying fallback models")
+                self.vllm_analyzer = None
             
-            # Get BrandVoiceValidator from imported models
-            if 'BrandVoiceValidator' in self.imported_models and self.imported_models['BrandVoiceValidator']:
-                self.brand_voice_validator = self.imported_models['BrandVoiceValidator']()
-                logger.info("✅ BrandVoiceValidator initialized with real model")
-            else:
-                logger.warning("⚠️ BrandVoiceValidator not available, using fallback")
-                self.brand_voice_validator = None
+            # Fallback to old ToneAnalyzer if VLLM not available
+            if self.vllm_analyzer is None:
+                if 'ToneAnalyzer' in self.imported_models and self.imported_models['ToneAnalyzer']:
+                    self.tone_analyzer = self.imported_models['ToneAnalyzer']()
+                    logger.info("✅ ToneAnalyzer initialized with real model (fallback)")
+                else:
+                    logger.warning("⚠️ ToneAnalyzer not available, using fallback")
+                    self.tone_analyzer = None
+            
+            # Fallback to old BrandVoiceValidator if VLLM not available
+            if self.vllm_analyzer is None:
+                if 'BrandVoiceValidator' in self.imported_models and self.imported_models['BrandVoiceValidator']:
+                    self.brand_voice_validator = self.imported_models['BrandVoiceValidator']()
+                    logger.info("✅ BrandVoiceValidator initialized with real model (fallback)")
+                else:
+                    logger.warning("⚠️ BrandVoiceValidator not available, using fallback")
+                    self.brand_voice_validator = None
                 
         except Exception as e:
             logger.error(f"Copywriting analysis initialization failed: {e}")
             import traceback
             logger.error(f"Copywriting initialization traceback: {traceback.format_exc()}")
+    
+    def _get_default_user_settings(self) -> Dict[str, Any]:
+        """Get default user settings for VLLM analysis"""
+        return {
+            'formality_score': 50,
+            'confidence_level': 'balanced',
+            'warmth_score': 50,
+            'energy_score': 50,
+            'readability_level': 'grade8',
+            'persona_type': 'general',
+            'allow_emojis': False,
+            'allow_slang': False
+        }
     
     def analyze_copywriting(self, image: np.ndarray, text_content: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -71,25 +95,67 @@ class CopywritingAnalyzer:
                 'errors': []
             }
             
-            # Extract text if not provided
-            if text_content is None:
-                text_content = self._extract_text_from_image(image)
+            # Use VLLM analyzer for comprehensive analysis if available
+            if self.vllm_analyzer:
+                try:
+                        # Analyze image directly
+                        user_settings = self._get_default_user_settings()
+                        # Save image temporarily for VLLM analysis
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                            import cv2
+                            cv2.imwrite(tmp_file.name, image)
+                            vllm_analysis = self.vllm_analyzer.analyze_image(tmp_file.name, user_settings)
+                            print(vllm_analysis)
+                        
+                        if vllm_analysis:
+                            results['tone_analysis'] = vllm_analysis.get('tone_analysis', {})
+                            results['grammar_analysis'] = vllm_analysis.get('grammar_analysis', {})
+                            results['compliance'] = vllm_analysis.get('compliance', {})
+                            results['visual_elements'] = vllm_analysis.get('visual_elements', {})
+                            results['text_metrics'] = vllm_analysis.get('text_metrics', {})
+                            text_content = vllm_analysis.get('extracted_text', '')
+                            logger.info("✅ Used VLLMToneAnalyzer for image analysis")
+                except Exception as e:
+                    logger.warning(f"VLLM analysis failed: {e}, falling back to traditional methods")
+                    # Fallback to traditional analysis
+                    if text_content is None:
+                        text_content = self._extract_text_from_image(image)
+                    
+                    # Ensure text_content is a string
+                    if isinstance(text_content, dict):
+                        text_content = str(text_content)
+                    elif not isinstance(text_content, str):
+                        text_content = str(text_content) if text_content is not None else ""
+                    
+                    # Analyze tone
+                    tone_results = self._analyze_tone(text_content)
+                    results['tone_analysis'] = tone_results
+            else:
+                # Traditional analysis fallback
+                # Extract text if not provided
+                if text_content is None:
+                    text_content = self._extract_text_from_image(image)
+                
+                # Ensure text_content is a string
+                if isinstance(text_content, dict):
+                    text_content = str(text_content)
+                elif not isinstance(text_content, str):
+                    text_content = str(text_content) if text_content is not None else ""
+                
+                # Analyze tone
+                tone_results = self._analyze_tone(text_content)
+                results['tone_analysis'] = tone_results
             
-            # Ensure text_content is a string
-            if isinstance(text_content, dict):
-                text_content = str(text_content)
-            elif not isinstance(text_content, str):
-                text_content = str(text_content) if text_content is not None else ""
-            
-            # Analyze tone
-            tone_results = self._analyze_tone(text_content)
-            results['tone_analysis'] = tone_results
-            
-            # Validate brand voice compliance
-            voice_compliance = self._validate_brand_voice(text_content, tone_results)
-            results['brand_voice_compliance'] = voice_compliance
+            # Validate brand voice compliance (only if not using VLLM)
+            if not self.vllm_analyzer or 'compliance' not in results:
+                tone_results = results.get('tone_analysis', {})
+                voice_compliance = self._validate_brand_voice(text_content, tone_results)
+                results['brand_voice_compliance'] = voice_compliance
             
             # Calculate overall copywriting score
+            tone_results = results.get('tone_analysis', {})
+            voice_compliance = results.get('brand_voice_compliance', {})
             copywriting_score = self._calculate_copywriting_score(tone_results, voice_compliance)
             results['copywriting_score'] = copywriting_score
             
@@ -132,14 +198,30 @@ class CopywritingAnalyzer:
                 'sentiment_score': 0.0
             }
             
-            if self.tone_analyzer and text_content:
-                # Use real tone analyzer - correct method name is analyze_text_tone
+            if self.vllm_analyzer and text_content:
+                # Use VLLM analyzer for tone analysis
+                try:
+                    user_settings = self._get_default_user_settings()
+                    analysis = self.vllm_analyzer.analyze_text(text_content, user_settings)
+                    if analysis and 'tone_analysis' in analysis:
+                        tone_results.update(analysis['tone_analysis'])
+                    logger.info("✅ Used VLLMToneAnalyzer for tone analysis")
+                except Exception as e:
+                    logger.warning(f"VLLM tone analysis failed: {e}, falling back to old analyzer")
+                    if self.tone_analyzer:
+                        analysis = self.tone_analyzer.analyze_text_tone(text_content)
+                        if analysis:
+                            tone_results.update(analysis)
+            elif self.tone_analyzer and text_content:
+                # Use old tone analyzer as fallback
                 analysis = self.tone_analyzer.analyze_text_tone(text_content)
                 if analysis:
                     tone_results.update(analysis)
+                logger.info("✅ Used ToneAnalyzer (fallback) for tone analysis")
             else:
                 # Fallback tone analysis
                 tone_results = self._fallback_tone_analysis(text_content)
+                logger.info("✅ Used fallback tone analysis")
             
             return tone_results
             
