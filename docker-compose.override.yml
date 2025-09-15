@@ -23,7 +23,7 @@ services:
     ports:
       - "8000:8000"
       - "9090:9090"  # Metrics port
-    command: ["python", "run_fastapi.py", "--reload"]
+    command: ["python", "run.py"]
     networks:
       - brandguard-network
 

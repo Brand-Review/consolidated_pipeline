@@ -5,7 +5,7 @@ This guide provides comprehensive instructions for deploying the BrandGuard AI P
 ## 🏗️ Architecture Overview
 
 The Docker setup includes:
-- **Main API Service**: FastAPI-based consolidated pipeline
+- **Main API Service**: Flask-based consolidated pipeline
 - **Model Integration**: Automatic cloning of 4 model repositories
 - **Reverse Proxy**: Nginx for production deployment
 - **Monitoring**: Prometheus and Grafana (development mode)
@@ -257,8 +257,7 @@ docker system prune -a
 - `POST /api/analyze/logo`: Logo detection only
 
 ### Documentation
-- `GET /docs`: Interactive API documentation
-- `GET /redoc`: Alternative API documentation
+- `GET /`: Main web interface for file uploads and analysis
 
 ## 🔒 Security Considerations
 

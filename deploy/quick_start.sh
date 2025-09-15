@@ -45,7 +45,7 @@ if curl -f http://localhost:8000/api/health > /dev/null 2>&1; then
     echo ""
     echo "🌐 Access your API at:"
     echo "   http://localhost:8000"
-    echo "   http://localhost:8000/docs"
+    echo "   http://localhost:8000/api/health"
     echo ""
     echo "📊 To view logs: docker-compose logs -f"
     echo "🛑 To stop: docker-compose down"

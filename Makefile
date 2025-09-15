@@ -41,6 +41,7 @@ dev:
 	@docker-compose -f docker-compose.yml -f docker-compose.override.yml up --build -d
 	@echo "✅ Development environment started!"
 	@echo "🌐 API: http://localhost:8000"
+	@echo "🏥 Health: http://localhost:8000/api/health"
 	@echo "📊 Grafana: http://localhost:3000 (admin/admin)"
 	@echo "📈 Prometheus: http://localhost:9090"
 
@@ -50,6 +51,7 @@ prod:
 	@docker-compose up --build -d
 	@echo "✅ Production environment started!"
 	@echo "🌐 API: http://localhost:8000"
+	@echo "🏥 Health: http://localhost:8000/api/health"
 
 # Build images
 build:
@@ -126,10 +128,25 @@ setup-models:
 # Update models
 update:
 	@echo "🔄 Updating models..."
-	@git pull origin main
+	@./update_models.sh
+	@docker-compose restart
+	@echo "✅ Models updated!"
+
+# Update models and rebuild
+update-rebuild:
+	@echo "🔄 Updating models and rebuilding..."
+	@./update_models.sh
 	@docker-compose down
 	@docker-compose up --build -d
-	@echo "✅ Models updated!"
+	@echo "✅ Models updated and rebuilt!"
+
+# Force update all models
+force-update:
+	@echo "🔄 Force updating all models..."
+	@rm -rf FontTypographyChecker CopywritingToneChecker ColorPaletteChecker LogoDetector
+	@./update_models.sh
+	@docker-compose restart
+	@echo "✅ All models force updated!"
 
 # Backup data
 backup:

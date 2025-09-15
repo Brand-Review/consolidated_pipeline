@@ -95,7 +95,7 @@ echo ""
 print_status "Service URLs:"
 print_status "  API: http://localhost:8000"
 print_status "  Health: http://localhost:8000/api/health"
-print_status "  Docs: http://localhost:8000/docs"
+print_status "  Web Interface: http://localhost:8000"
 
 if [ "$MODE" = "development" ]; then
     print_status "  Grafana: http://localhost:3000 (admin/admin)"

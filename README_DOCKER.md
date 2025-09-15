@@ -27,7 +27,7 @@ That's it! 🎉
 - 🏷️ Logo Detection & Placement Validation
 
 ✅ **Production-Ready Stack**:
-- FastAPI backend with auto-docs
+- Flask backend with web interface
 - Nginx reverse proxy
 - Redis caching
 - Health monitoring
@@ -43,7 +43,6 @@ That's it! 🎉
 | Service | URL | Description |
 |---------|-----|-------------|
 | **API** | http://localhost:8000 | Main web interface |
-| **Docs** | http://localhost:8000/docs | Interactive API docs |
 | **Health** | http://localhost:8000/api/health | Service health check |
 | **Grafana** | http://localhost:3000 | Monitoring (dev mode) |
 | **Prometheus** | http://localhost:9090 | Metrics (dev mode) |
