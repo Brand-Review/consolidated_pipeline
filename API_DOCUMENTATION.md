@@ -4,6 +4,26 @@
 
 The BrandGuard Consolidated Pipeline provides a unified API for comprehensive brand analysis including color validation, typography analysis, copywriting assessment, and logo detection. The system uses advanced AI models including YOLOv8 nano, Qwen2.5-VL-3B-Instruct, and various NLP models for accurate brand compliance checking.
 
+## Key Features
+
+### 🎯 **Advanced Text Extraction**
+- **VLLM-Powered Analysis**: Uses Qwen2.5-VL-3B-Instruct for intelligent text extraction from images
+- **OCR Fallback**: Automatic fallback to PaddleOCR when VLLM extraction fails
+- **Multi-Pattern Recognition**: Handles various text formats including quoted text, descriptive text, and mixed content
+- **Real-time Processing**: Extracts text content and provides it in API responses
+
+### 🔍 **Comprehensive Brand Analysis**
+- **Color Validation**: CIEDE2000 color matching with brand palette compliance
+- **Typography Analysis**: Font identification and brand guideline compliance
+- **Copywriting Assessment**: Tone analysis, grammar checking, and brand voice validation
+- **Logo Detection**: Hybrid YOLOv8 + Qwen detection with placement validation
+
+### 🚀 **Production-Ready Features**
+- **Docker Support**: Full containerization with Docker Compose
+- **Health Monitoring**: Built-in health checks and status endpoints
+- **Error Handling**: Robust error handling with graceful fallbacks
+- **Scalable Architecture**: Designed for high-volume production use
+
 ## Base URL
 
 ```
@@ -149,14 +169,60 @@ Perform comprehensive brand analysis using all available models.
         "violations": []
       },
       "copywriting_analysis": {
+        "extracted_text": "all in or nothing\nMartinez Nitrocharge\nadidas",
+        "text_content": "all in or nothing\nMartinez Nitrocharge\nadidas",
         "tone_analysis": {
-          "sentiment": "positive",
-          "formality": 0.65,
-          "confidence": 0.78
+          "formality": {
+            "formality_level": "formal",
+            "formality_score": 0.9
+          },
+          "sentiment": {
+            "overall_sentiment": "motivational",
+            "compound": 0.0
+          },
+          "readability": {
+            "score": 0.9,
+            "level": "grade 8"
+          }
         },
-        "brand_voice_match": 0.82,
+        "grammar_analysis": {
+          "grammar_score": 95,
+          "grammar_errors": [],
+          "grammar_suggestions": [],
+          "spelling_errors": [],
+          "punctuation_issues": []
+        },
+        "visual_elements": {
+          "has_text": true,
+          "text_quality": "good",
+          "visual_appeal": "high",
+          "colors": ["black", "white"],
+          "layout": "centered text",
+          "branding": "adidas logo visible",
+          "text_placement": "bottom right of image"
+        },
+        "text_metrics": {
+          "word_count": 6,
+          "sentence_count": 1,
+          "readability_level": "grade 8"
+        },
+        "brand_voice_compliance": {
+          "score": 0.95,
+          "failures": [],
+          "explanations": [],
+          "failure_summary": "Text meets requirements"
+        },
+        "compliance": {
+          "score": 0.95,
+          "failures": [],
+          "explanations": [],
+          "failure_summary": "Text meets requirements"
+        },
+        "copywriting_score": 0.92,
+        "errors": [],
         "recommendations": [
-          "Consider using more formal language"
+          "Text effectively conveys brand message",
+          "Visual elements enhance readability"
         ]
       },
       "logo_analysis": {
@@ -260,9 +326,61 @@ Plus copywriting analysis parameters from comprehensive analysis endpoint.
 {
   "success": true,
   "copywriting_analysis": {
-    "tone_analysis": {...},
-    "brand_voice_match": 0.82,
-    "recommendations": [...]
+    "extracted_text": "all in or nothing\nMartinez Nitrocharge\nadidas",
+    "text_content": "all in or nothing\nMartinez Nitrocharge\nadidas",
+    "tone_analysis": {
+      "formality": {
+        "formality_level": "formal",
+        "formality_score": 0.9
+      },
+      "sentiment": {
+        "overall_sentiment": "motivational",
+        "compound": 0.0
+      },
+      "readability": {
+        "score": 0.9,
+        "level": "grade 8"
+      }
+    },
+    "grammar_analysis": {
+      "grammar_score": 95,
+      "grammar_errors": [],
+      "grammar_suggestions": [],
+      "spelling_errors": [],
+      "punctuation_issues": []
+    },
+    "visual_elements": {
+      "has_text": true,
+      "text_quality": "good",
+      "visual_appeal": "high",
+      "colors": ["black", "white"],
+      "layout": "centered text",
+      "branding": "adidas logo visible",
+      "text_placement": "bottom right of image"
+    },
+    "text_metrics": {
+      "word_count": 6,
+      "sentence_count": 1,
+      "readability_level": "grade 8"
+    },
+    "brand_voice_compliance": {
+      "score": 0.95,
+      "failures": [],
+      "explanations": [],
+      "failure_summary": "Text meets requirements"
+    },
+    "compliance": {
+      "score": 0.95,
+      "failures": [],
+      "explanations": [],
+      "failure_summary": "Text meets requirements"
+    },
+    "copywriting_score": 0.92,
+    "errors": [],
+    "recommendations": [
+      "Text effectively conveys brand message",
+      "Visual elements enhance readability"
+    ]
   }
 }
 ```
@@ -481,7 +599,121 @@ curl -X POST \
   http://localhost:5001/api/analyze
 ```
 
+### Text Extraction Example
+
+```python
+import requests
+
+# Analyze image with text extraction
+with open('adidas_campaign.jpg', 'rb') as f:
+    response = requests.post(
+        'http://localhost:5001/api/analyze',
+        files={'file': f},
+        data={
+            'enable_copywriting': 'true',
+            'enable_logo': 'true'
+        }
+    )
+
+result = response.json()
+copywriting = result['results']['model_results']['copywriting_analysis']
+
+# Access extracted text
+print(f"Extracted Text: {copywriting['extracted_text']}")
+print(f"Word Count: {copywriting['text_metrics']['word_count']}")
+print(f"Formality Level: {copywriting['tone_analysis']['formality']['formality_level']}")
+print(f"Text Quality: {copywriting['visual_elements']['text_quality']}")
+print(f"Brand Compliance: {copywriting['brand_voice_compliance']['score']}")
+```
+
+**Expected Output:**
+```
+Extracted Text: all in or nothing
+Martinez Nitrocharge
+adidas
+Word Count: 6
+Formality Level: formal
+Text Quality: good
+Brand Compliance: 0.95
+```
+
+## Text Extraction Response Fields
+
+### Copywriting Analysis Response Structure
+
+The copywriting analysis now includes comprehensive text extraction and analysis:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `extracted_text` | string | Raw text extracted from the image |
+| `text_content` | string | Alias for extracted_text (compatibility) |
+| `tone_analysis` | object | Detailed tone and sentiment analysis |
+| `grammar_analysis` | object | Grammar and spelling analysis |
+| `visual_elements` | object | Visual analysis of text presentation |
+| `text_metrics` | object | Quantitative text metrics |
+| `brand_voice_compliance` | object | Brand voice compliance scoring |
+| `compliance` | object | Overall compliance assessment |
+| `copywriting_score` | float | Overall copywriting score (0-1) |
+| `errors` | array | Any errors encountered during analysis |
+| `recommendations` | array | Improvement recommendations |
+
+### Tone Analysis Structure
+
+```json
+{
+  "tone_analysis": {
+    "formality": {
+      "formality_level": "formal|professional|casual|very_casual",
+      "formality_score": 0.9
+    },
+    "sentiment": {
+      "overall_sentiment": "positive|negative|neutral|motivational",
+      "compound": 0.0
+    },
+    "readability": {
+      "score": 0.9,
+      "level": "grade 8"
+    }
+  }
+}
+```
+
+### Visual Elements Structure
+
+```json
+{
+  "visual_elements": {
+    "has_text": true,
+    "text_quality": "good|fair|poor|none",
+    "visual_appeal": "high|medium|low",
+    "colors": ["black", "white"],
+    "layout": "centered text|left-aligned|right-aligned|unknown",
+    "branding": "adidas logo visible|none|detected",
+    "text_placement": "center|top|bottom|left|right|unknown"
+  }
+}
+```
+
+### Text Metrics Structure
+
+```json
+{
+  "text_metrics": {
+    "word_count": 6,
+    "sentence_count": 1,
+    "readability_level": "grade 8"
+  }
+}
+```
+
 ## Changelog
+
+### Version 1.1.0
+- **Enhanced Text Extraction**: Improved VLLM text extraction with multiple pattern recognition
+- **OCR Fallback**: Automatic fallback to PaddleOCR when VLLM extraction fails
+- **Rich API Response**: Added extracted_text and text_content fields to copywriting analysis
+- **Improved Visual Analysis**: Enhanced visual elements detection and text quality assessment
+- **Better Error Handling**: Robust error handling with graceful fallbacks for text extraction
 
 ### Version 1.0.0
 - Initial release with comprehensive brand analysis

@@ -109,12 +109,50 @@ class CopywritingAnalyzer:
                             print(vllm_analysis)
                         
                         if vllm_analysis:
-                            results['tone_analysis'] = vllm_analysis.get('tone_analysis', {})
-                            results['grammar_analysis'] = vllm_analysis.get('grammar_analysis', {})
+                            # Map VLLM response structure to expected format
+                            analysis = vllm_analysis.get('analysis', {})
+                            
+                            # Extract tone analysis from nested structure
+                            results['tone_analysis'] = {
+                                'formality': analysis.get('formality', {}),
+                                'sentiment': analysis.get('sentiment', {}),
+                                'readability': analysis.get('readability', {})
+                            }
+                            
+                            # Extract grammar analysis from nested structure
+                            results['grammar_analysis'] = analysis.get('grammar', {})
+                            
+                            # Extract visual elements from nested structure
+                            results['visual_elements'] = analysis.get('visual_analysis', {})
+                            
+                            # Extract text metrics
+                            results['text_metrics'] = {
+                                'word_count': vllm_analysis.get('word_count', 0),
+                                'sentence_count': vllm_analysis.get('sentence_count', 0),
+                                'readability_level': analysis.get('readability', {}).get('level', 'grade8')
+                            }
+                            
+                            # Extract compliance (this is already at top level)
                             results['compliance'] = vllm_analysis.get('compliance', {})
-                            results['visual_elements'] = vllm_analysis.get('visual_elements', {})
-                            results['text_metrics'] = vllm_analysis.get('text_metrics', {})
-                            text_content = vllm_analysis.get('extracted_text', '')
+                            
+                            # Extract text content
+                            text_content = vllm_analysis.get('text', '')
+                            
+                            # If VLLM didn't extract text, try OCR as fallback
+                            if not text_content or text_content.strip() == '':
+                                logger.info("VLLM didn't extract text, trying OCR fallback...")
+                                ocr_text = self._extract_text_from_image(image)
+                                if ocr_text and ocr_text.strip():
+                                    text_content = ocr_text
+                                    logger.info(f"✅ OCR extracted text: '{text_content}'")
+                                    
+                                    # Update the analysis with OCR text
+                                    results['text_metrics'] = {
+                                        'word_count': len(text_content.split()),
+                                        'sentence_count': len(text_content.split('.')),
+                                        'readability_level': results['text_metrics'].get('readability_level', 'grade8')
+                                    }
+                            
                             logger.info("✅ Used VLLMToneAnalyzer for image analysis")
                 except Exception as e:
                     logger.warning(f"VLLM analysis failed: {e}, falling back to traditional methods")
@@ -147,11 +185,23 @@ class CopywritingAnalyzer:
                 tone_results = self._analyze_tone(text_content)
                 results['tone_analysis'] = tone_results
             
-            # Validate brand voice compliance (only if not using VLLM)
-            if not self.vllm_analyzer or 'compliance' not in results:
-                tone_results = results.get('tone_analysis', {})
-                voice_compliance = self._validate_brand_voice(text_content, tone_results)
-                results['brand_voice_compliance'] = voice_compliance
+            # Validate brand voice compliance
+            if 'brand_voice_compliance' not in results:
+                # Use VLLM compliance if available, otherwise calculate
+                if 'compliance' in results and results['compliance']:
+                    # Map VLLM compliance to brand voice compliance format
+                    vllm_compliance = results['compliance']
+                    results['brand_voice_compliance'] = {
+                        'score': vllm_compliance.get('score', 0.5),
+                        'failures': vllm_compliance.get('failures', []),
+                        'explanations': vllm_compliance.get('explanations', []),
+                        'failure_summary': vllm_compliance.get('failure_summary', 'Analysis complete')
+                    }
+                else:
+                    # Calculate brand voice compliance using traditional method
+                    tone_results = results.get('tone_analysis', {})
+                    voice_compliance = self._validate_brand_voice(text_content, tone_results)
+                    results['brand_voice_compliance'] = voice_compliance
             
             # Calculate overall copywriting score
             tone_results = results.get('tone_analysis', {})
@@ -163,7 +213,13 @@ class CopywritingAnalyzer:
             recommendations = self._generate_copywriting_recommendations(tone_results, voice_compliance)
             results['recommendations'] = recommendations
             
+            # Add extracted text to results
+            results['extracted_text'] = text_content
+            results['text_content'] = text_content  # Alias for compatibility
+            
             logger.info(f"✅ Copywriting analysis completed. Score: {copywriting_score:.2f}")
+            if text_content:
+                logger.info(f"📝 Extracted text: '{text_content}'")
             return results
             
         except Exception as e:
@@ -274,15 +330,25 @@ class CopywritingAnalyzer:
         """Calculate overall copywriting score"""
         try:
             # Base score from brand voice compliance
-            base_score = voice_compliance.get('compliance_score', 0.0)
+            base_score = voice_compliance.get('score', voice_compliance.get('compliance_score', 0.0))
             
-            # Tone confidence factor
-            tone_confidence = tone_results.get('confidence', 0.0)
+            # Extract tone confidence from nested structure
+            formality = tone_results.get('formality', {})
+            sentiment = tone_results.get('sentiment', {})
+            
+            # Tone confidence factor (use formality score as confidence)
+            tone_confidence = formality.get('formality_score', 0.5)
             tone_factor = tone_confidence * 0.3
             
-            # Sentiment score factor
-            sentiment_score = tone_results.get('sentiment_score', 0.0)
-            sentiment_factor = (sentiment_score + 1) / 2 * 0.2  # Convert -1 to 1 range to 0 to 1
+            # Sentiment score factor (convert sentiment to numeric)
+            sentiment_text = sentiment.get('overall_sentiment', 'neutral')
+            if sentiment_text == 'positive':
+                sentiment_score = 0.8
+            elif sentiment_text == 'negative':
+                sentiment_score = 0.2
+            else:
+                sentiment_score = 0.5
+            sentiment_factor = sentiment_score * 0.2
             
             # Calculate final score
             final_score = base_score * 0.5 + tone_factor + sentiment_factor
