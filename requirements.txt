@@ -45,6 +45,7 @@ seaborn>=0.11.0
 tqdm>=4.62.0
 pathlib2>=2.3.0
 python-dateutil>=2.8.0
+scikit-image==0.24.0
 
 # Development dependencies
 pytest>=6.2.0
