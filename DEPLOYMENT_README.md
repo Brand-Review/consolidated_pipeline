@@ -94,6 +94,17 @@ curl http://localhost:5001/api/health
 
 # Test vLLM server
 curl http://localhost:8000/v1/models
+
+
+## ** AWS Deployment **
+
+Login into AWS Console with Credentials and PEM File
+
+Go to EC2 Dashboard and create a new instance
+
+```bash
+ssh -i brandguard-key.pem ubuntu@your-instance-ip
+
 ```
 
 ## 🔍 Testing Your Deployment
