@@ -28,8 +28,11 @@ class CopywritingAnalyzer:
     def _initialize_components(self):
         """Initialize copywriting analysis components"""
         try:
-            # Prioritize VLLMToneAnalyzer (new VLLM-based approach)
-            if 'VLLMToneAnalyzer' in self.imported_models and self.imported_models['VLLMToneAnalyzer']:
+            # Prioritize HybridToneAnalyzer (VLLM + OpenRouter fallback)
+            if 'HybridToneAnalyzer' in self.imported_models and self.imported_models['HybridToneAnalyzer']:
+                self.vllm_analyzer = self.imported_models['HybridToneAnalyzer']()
+                logger.info("✅ HybridToneAnalyzer initialized with VLLM + OpenRouter fallback")
+            elif 'VLLMToneAnalyzer' in self.imported_models and self.imported_models['VLLMToneAnalyzer']:
                 self.vllm_analyzer = self.imported_models['VLLMToneAnalyzer']()
                 logger.info("✅ VLLMToneAnalyzer initialized with real model")
             else:
@@ -109,8 +112,9 @@ class CopywritingAnalyzer:
                             print(vllm_analysis)
                         
                         if vllm_analysis:
-                            # Map VLLM response structure to expected format
+                            # Map VLLM/Hybrid response structure to expected format
                             analysis = vllm_analysis.get('analysis', {})
+                            backend_used = vllm_analysis.get('backend_used', 'unknown')
                             
                             # Extract tone analysis from nested structure
                             results['tone_analysis'] = {
@@ -137,6 +141,10 @@ class CopywritingAnalyzer:
                             
                             # Extract text content
                             text_content = vllm_analysis.get('text', '')
+                            
+                            # Log which backend was used
+                            if backend_used != 'unknown':
+                                logger.info(f"✅ Analysis completed using {backend_used} backend")
                             
                             # If VLLM didn't extract text, try OCR as fallback
                             if not text_content or text_content.strip() == '':
@@ -255,15 +263,19 @@ class CopywritingAnalyzer:
             }
             
             if self.vllm_analyzer and text_content:
-                # Use VLLM analyzer for tone analysis
+                # Use VLLM/Hybrid analyzer for tone analysis
                 try:
                     user_settings = self._get_default_user_settings()
                     analysis = self.vllm_analyzer.analyze_text(text_content, user_settings)
-                    if analysis and 'tone_analysis' in analysis:
+                    if analysis and 'analysis' in analysis:
+                        tone_results.update(analysis['analysis'])
+                        backend_used = analysis.get('backend_used', 'unknown')
+                        logger.info(f"✅ Used analyzer for tone analysis (backend: {backend_used})")
+                    elif analysis and 'tone_analysis' in analysis:
                         tone_results.update(analysis['tone_analysis'])
-                    logger.info("✅ Used VLLMToneAnalyzer for tone analysis")
+                        logger.info("✅ Used analyzer for tone analysis")
                 except Exception as e:
-                    logger.warning(f"VLLM tone analysis failed: {e}, falling back to old analyzer")
+                    logger.warning(f"VLLM/Hybrid tone analysis failed: {e}, falling back to old analyzer")
                     if self.tone_analyzer:
                         analysis = self.tone_analyzer.analyze_text_tone(text_content)
                         if analysis:

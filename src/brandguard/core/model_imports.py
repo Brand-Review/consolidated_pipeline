@@ -166,6 +166,24 @@ def import_all_models():
             print(f"❌ VLLMToneAnalyzer import failed: {e}")
             VLLMToneAnalyzer = None
         
+        # Import HybridToneAnalyzer (VLLM + OpenRouter fallback)
+        try:
+            import importlib.util
+            hybrid_analyzer_path = os.path.join(copywriting_path, 'brandguard', 'core', 'hybrid_analyzer.py')
+            if os.path.exists(hybrid_analyzer_path):
+                spec = importlib.util.spec_from_file_location("hybrid_analyzer", hybrid_analyzer_path)
+                hybrid_analyzer_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(hybrid_analyzer_module)
+                HybridToneAnalyzer = hybrid_analyzer_module.HybridToneAnalyzer
+                imported_models['HybridToneAnalyzer'] = HybridToneAnalyzer
+                print("✅ HybridToneAnalyzer imported successfully using importlib")
+            else:
+                print(f"❌ HybridToneAnalyzer file not found at: {hybrid_analyzer_path}")
+                HybridToneAnalyzer = None
+        except Exception as e:
+            print(f"❌ HybridToneAnalyzer import failed: {e}")
+            HybridToneAnalyzer = None
+        
         # Import Logo Detection components using importlib
         try:
             import importlib.util
