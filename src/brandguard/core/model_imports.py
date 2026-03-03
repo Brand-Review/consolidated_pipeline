@@ -5,6 +5,7 @@ Version: 1.0.0
 Description:
 Model Imports and Initialization
 Handles importing and initializing all BrandGuard models
+Self-contained - uses only local implementations within consolidated_pipeline
 """
 
 import os
@@ -18,245 +19,74 @@ logger = logging.getLogger(__name__)
 MODELS_LOADED = False
 imported_models = {}
 
+# Model references for pipeline orchestrator
+FontIdentifier = None
+TextExtractor = None
+ColorPaletteExtractor = None
+ContrastChecker = None
+TypographyValidator = None
+ToneAnalyzer = None
+CopywritingTextExtractor = None
+BrandVoiceValidator = None
+LogoDetector = None
+LogoValidator = None
+
+
 def import_all_models():
-    """Import all available models from individual modules"""
+    """Import all available models from local consolidated_pipeline modules"""
     global MODELS_LOADED, imported_models
+    global FontIdentifier, TextExtractor, ColorPaletteExtractor, ContrastChecker
+    global TypographyValidator, ToneAnalyzer, CopywritingTextExtractor
+    global BrandVoiceValidator, LogoDetector, LogoValidator
     
-    print("🚀 Starting import_all_models...")
+    logger.info("🚀 Starting import_all_models (self-contained mode)...")
     try:
-        # Get the parent directory (one level up from consolidated_pipeline)
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        # Go up: core -> brandguard -> src -> consolidated_pipeline -> brandReviewModels
-        parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_dir))))
-        
-        # Add paths to individual model directories
-        color_path = os.path.join(parent_dir, 'ColorPaletteChecker', 'src')
-        typography_path = os.path.join(parent_dir, 'FontTypographyChecker', 'src')
-        copywriting_path = os.path.join(parent_dir, 'CopywritingToneChecker', 'src')
-        logo_path = os.path.join(parent_dir, 'LogoDetector', 'src')
-        
-        # Add paths to sys.path
-        for path in [color_path, typography_path, copywriting_path, logo_path]:
-            if path not in sys.path:
-                sys.path.insert(0, path)
-        
-        # Import Color Analysis components using importlib
+        # Try to import FontIdentifier (HuggingFace-based font detection + PaddleOCR)
         try:
-            import importlib.util
-            color_palette_path = os.path.join(color_path, 'brandguard', 'core', 'color_palette.py')
-            if os.path.exists(color_palette_path):
-                spec = importlib.util.spec_from_file_location("color_palette", color_palette_path)
-                color_palette_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(color_palette_module)
-                ColorPaletteExtractor = color_palette_module.ColorPaletteExtractor
-                ColorPaletteValidator = color_palette_module.ColorPaletteValidator
-                imported_models['ColorPaletteExtractor'] = ColorPaletteExtractor
-                imported_models['ColorPaletteValidator'] = ColorPaletteValidator
-                print("✅ ColorPaletteExtractor and ColorPaletteValidator imported successfully using importlib")
-            else:
-                print(f"❌ ColorPaletteExtractor file not found at: {color_palette_path}")
-                ColorPaletteExtractor = None
-                ColorPaletteValidator = None
-        except Exception as e:
-            print(f"❌ ColorPaletteExtractor import failed: {e}")
-            ColorPaletteExtractor = None
-            ColorPaletteValidator = None
-        
-        # Import Typography Analysis components using importlib
-        try:
-            import importlib.util
-            font_identifier_path = os.path.join(typography_path, 'brandguard', 'core', 'font_identifier.py')
-            if os.path.exists(font_identifier_path):
-                spec = importlib.util.spec_from_file_location("font_identifier", font_identifier_path)
-                font_identifier_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(font_identifier_module)
-                FontIdentifier = font_identifier_module.FontIdentifier
-                imported_models['FontIdentifier'] = FontIdentifier
-                print("✅ FontIdentifier imported successfully using importlib")
-            else:
-                print(f"❌ FontIdentifier file not found at: {font_identifier_path}")
-                FontIdentifier = None
-        except Exception as e:
-            print(f"❌ FontIdentifier import failed: {e}")
+            from .font_identifier import MultilingualFontIdentifier, create_font_identifier
+            FontIdentifier = create_font_identifier
+            logger.info("✅ MultilingualFontIdentifier loaded (PaddleOCR + HuggingFace font-identifier)")
+        except ImportError as e:
+            logger.warning(f"⚠️ FontIdentifier not available: {e}")
             FontIdentifier = None
         
+        # Import LogoDetector (HuggingFace YOLOv8-based logo detection)
         try:
-            import importlib.util
-            typography_validator_path = os.path.join(typography_path, 'brandguard', 'core', 'typography_validator.py')
-            if os.path.exists(typography_validator_path):
-                spec = importlib.util.spec_from_file_location("typography_validator", typography_validator_path)
-                typography_validator_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(typography_validator_module)
-                TypographyValidator = typography_validator_module.TypographyValidator
-                imported_models['TypographyValidator'] = TypographyValidator
-                print("✅ TypographyValidator imported successfully using importlib")
-            else:
-                print(f"❌ TypographyValidator file not found at: {typography_validator_path}")
-                TypographyValidator = None
-        except Exception as e:
-            print(f"❌ TypographyValidator import failed: {e}")
-            TypographyValidator = None
-        
-        # Import FontComplianceChecker (main orchestrator)
-        try:
-            import importlib.util
-            
-            font_compliance_path = os.path.join(typography_path, 'brandguard', 'core', 'font_compliance.py')
-
-            if os.path.exists(font_compliance_path):
-                # Import the module with proper path handling
-                spec = importlib.util.spec_from_file_location("font_compliance", font_compliance_path)
-                font_compliance_module = importlib.util.module_from_spec(spec)
-                
-                # Set up the module's __package__ attribute to avoid relative import issues
-                font_compliance_module.__package__ = 'brandguard.core'
-                
-                spec.loader.exec_module(font_compliance_module)
-
-                FontComplianceChecker = font_compliance_module.FontComplianceChecker
-
-                imported_models['FontComplianceChecker'] = FontComplianceChecker
-
-                
-                print("✅ FontComplianceChecker imported successfully using importlib")
-            else:
-                print(f"❌ FontComplianceChecker file not found at: {font_compliance_path}")
-                FontComplianceChecker = None
-        except Exception as e:
-            print(f"❌ FontComplianceChecker import failed: {e}")
-            FontComplianceChecker = None
-        
-        # Import TextExtractor (PaddleOCR integration)
-        try:
-            import importlib.util
-            text_extractor_path = os.path.join(typography_path, 'brandguard', 'core', 'text_extractor.py')
-            if os.path.exists(text_extractor_path):
-                spec = importlib.util.spec_from_file_location("text_extractor", text_extractor_path)
-                text_extractor_module = importlib.util.module_from_spec(spec)
-                
-                # Set up the module's __package__ attribute to avoid relative import issues
-                text_extractor_module.__package__ = 'brandguard.core'
-                
-                spec.loader.exec_module(text_extractor_module)
-                TextExtractor = text_extractor_module.TextExtractor
-                imported_models['TextExtractor'] = TextExtractor
-                print("✅ TextExtractor imported successfully using importlib")
-            else:
-                print(f"❌ TextExtractor file not found at: {text_extractor_path}")
-                TextExtractor = None
-        except Exception as e:
-            print(f"❌ TextExtractor import failed: {e}")
-            TextExtractor = None
-        
-        # Import VLLMToneAnalyzer (new VLLM-based approach)
-        try:
-            import importlib.util
-            vllm_analyzer_path = os.path.join(copywriting_path, 'brandguard', 'core', 'vllm_analyzer.py')
-            if os.path.exists(vllm_analyzer_path):
-                spec = importlib.util.spec_from_file_location("vllm_analyzer", vllm_analyzer_path)
-                vllm_analyzer_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(vllm_analyzer_module)
-                VLLMToneAnalyzer = vllm_analyzer_module.VLLMToneAnalyzer
-                imported_models['VLLMToneAnalyzer'] = VLLMToneAnalyzer
-                print("✅ VLLMToneAnalyzer imported successfully using importlib")
-            else:
-                print(f"❌ VLLMToneAnalyzer file not found at: {vllm_analyzer_path}")
-                VLLMToneAnalyzer = None
-        except Exception as e:
-            print(f"❌ VLLMToneAnalyzer import failed: {e}")
-            VLLMToneAnalyzer = None
-        
-        # Import HybridToneAnalyzer (VLLM + OpenRouter fallback)
-        try:
-            import importlib.util
-            hybrid_analyzer_path = os.path.join(copywriting_path, 'brandguard', 'core', 'hybrid_analyzer.py')
-            if os.path.exists(hybrid_analyzer_path):
-                spec = importlib.util.spec_from_file_location("hybrid_analyzer", hybrid_analyzer_path)
-                hybrid_analyzer_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(hybrid_analyzer_module)
-                HybridToneAnalyzer = hybrid_analyzer_module.HybridToneAnalyzer
-                imported_models['HybridToneAnalyzer'] = HybridToneAnalyzer
-                print("✅ HybridToneAnalyzer imported successfully using importlib")
-            else:
-                print(f"❌ HybridToneAnalyzer file not found at: {hybrid_analyzer_path}")
-                HybridToneAnalyzer = None
-        except Exception as e:
-            print(f"❌ HybridToneAnalyzer import failed: {e}")
-            HybridToneAnalyzer = None
-        
-        # Import Logo Detection components using importlib
-        try:
-            import importlib.util
-            logo_detector_path = os.path.join(logo_path, 'brandguard', 'core', 'detector.py')
-            if os.path.exists(logo_detector_path):
-                spec = importlib.util.spec_from_file_location("logo_detector", logo_detector_path)
-                logo_detector_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(logo_detector_module)
-                LogoDetector = logo_detector_module.LogoDetector
-                imported_models['LogoDetector'] = LogoDetector
-                print("✅ LogoDetector imported successfully using importlib")
-            else:
-                print(f"❌ LogoDetector file not found at: {logo_detector_path}")
-                LogoDetector = None
-        except Exception as e:
-            print(f"❌ LogoDetector import failed: {e}")
+            from .logo_detector import LogoDetector, LogoPlacementValidator, create_logo_detector
+            LogoDetector = create_logo_detector
+            LogoValidator = LogoPlacementValidator
+            logger.info("✅ LogoDetector loaded (YOLOv8 logo detection + brand identification)")
+        except ImportError as e:
+            logger.warning(f"⚠️ LogoDetector not available: {e}")
             LogoDetector = None
+            LogoValidator = None
         
-        try:
-            import importlib.util
-            logo_validator_path = os.path.join(logo_path, 'brandguard', 'core', 'validator.py')
-            if os.path.exists(logo_validator_path):
-                spec = importlib.util.spec_from_file_location("logo_validator", logo_validator_path)
-                logo_validator_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(logo_validator_module)
-                LogoPlacementValidator = logo_validator_module.LogoPlacementValidator
-                imported_models['LogoPlacementValidator'] = LogoPlacementValidator
-                print("✅ LogoPlacementValidator imported successfully using importlib")
-            else:
-                print(f"❌ LogoPlacementValidator file not found at: {logo_validator_path}")
-                LogoPlacementValidator = None
-        except Exception as e:
-            print(f"❌ LogoPlacementValidator import failed: {e}")
-            LogoPlacementValidator = None
+        # Self-contained mode: Use local implementations
+        # All analyzers (ColorAnalyzer, LogoAnalyzer, TypographyAnalyzer, CopywritingAnalyzer)
+        # are implemented within consolidated_pipeline and handle their own model initialization
         
-        try:
-            import importlib.util
-            pdf_processor_path = os.path.join(logo_path, 'brandguard', 'core', 'pdf_processor.py')
-            if os.path.exists(pdf_processor_path):
-                spec = importlib.util.spec_from_file_location("pdf_processor", pdf_processor_path)
-                pdf_processor_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(pdf_processor_module)
-                PDFImageExtractor = pdf_processor_module.PDFImageExtractor
-                PDFLogoDetector = pdf_processor_module.PDFLogoDetector
-                imported_models['PDFImageExtractor'] = PDFImageExtractor
-                imported_models['PDFLogoDetector'] = PDFLogoDetector
-                print("✅ PDFImageExtractor and PDFLogoDetector imported successfully using importlib")
-            else:
-                print(f"❌ PDFImageExtractor file not found at: {pdf_processor_path}")
-                PDFImageExtractor = None
-                PDFLogoDetector = None
-        except Exception as e:
-            print(f"❌ PDFImageExtractor import failed: {e}")
-            PDFImageExtractor = None
-            PDFLogoDetector = None
+        logger.info("✅ Using self-contained model implementations")
+        logger.info("   All models are handled by local analyzers within consolidated_pipeline")
         
-        # LogoValidator is now imported above as LogoPlacementValidator
-        LogoValidator = LogoPlacementValidator
-        
-        # Check if we have at least some models loaded
-        if any(imported_models.values()):
-            MODELS_LOADED = True
-            logger.info("✅ Some models loaded successfully")
-        else:
-            MODELS_LOADED = False
-            logger.warning("No real models could be imported. Using fallback implementations.")
+        # Return dict with all models for pipeline orchestrator
+        MODELS_LOADED = True
+        imported_models = {
+            'FontIdentifier': FontIdentifier,
+            'LogoDetector': LogoDetector,
+            'LogoValidator': LogoValidator,
+        }
         
     except Exception as e:
         MODELS_LOADED = False
         logger.warning(f"Error during model import: {e}. Using fallback implementations.")
+        imported_models = {
+            'FontIdentifier': None,
+            'LogoDetector': None,
+            'LogoValidator': None,
+        }
 
-    logger.info("💡 Note: Some models require additional ML libraries (torch, transformers)")
-    logger.info("   Install them separately for full typography and copywriting analysis")
+    logger.info("💡 All models use local implementations within consolidated_pipeline")
+    logger.info("   No external directory dependencies required")
 
     return MODELS_LOADED, imported_models
 

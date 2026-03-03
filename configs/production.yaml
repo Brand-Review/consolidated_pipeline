@@ -121,3 +121,11 @@ error_handling:
   enable_detailed_errors: false
   log_errors: true
   error_notification: false
+
+# External API Credentials
+api_credentials:
+  # Google Cloud Vision API credentials
+  # Set this to the path of your service account JSON file
+  # Example: "/Users/username/path/to/service-account.json"
+  # Leave empty or null to use GOOGLE_APPLICATION_CREDENTIALS environment variable
+  google_application_credentials: "/home/orvi/br/consolidated_pipeline/brandreview-ocr-6117db769cca.json"

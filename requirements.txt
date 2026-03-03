@@ -14,9 +14,11 @@ transformers>=4.20.0
 scikit-learn>=1.0.0
 
 # OCR and Text Processing
+google-cloud-vision>=3.7.2
 pytesseract>=0.3.10
 nltk>=3.7
 textblob>=0.17.1
+pyspellchecker>=0.7.0
 
 # Image and Document Processing
 PyMuPDF>=1.19.0

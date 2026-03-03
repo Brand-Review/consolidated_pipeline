@@ -15,246 +15,21 @@ from PIL import Image
 import io
 import base64
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import copy
 
 # Import individual model components
 from ..config.settings import Settings, BrandColorPalette, TypographyRules, BrandVoiceSettings, LogoDetectionSettings
 from .typography_analyzer import TypographyAnalyzer
 
-# Import real working models
-try:
-    # Color Analysis Models
-    import sys
-    import os
-    
-    # Get the absolute path to the parent directory (brandReviewModels)
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    # From consolidated_pipeline/src/brandguard/core/ -> go up 4 levels to brandReviewModels
-    parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_dir))))
-    
-    # Add paths to individual model directories
-    color_path = os.path.join(parent_dir, 'ColorPaletteChecker', 'src')
-    typography_path = os.path.join(parent_dir, 'FontTypographyChecker', 'src')
-    copywriting_path = os.path.join(parent_dir, 'CopywritingToneChecker', 'src')
-    logo_path = os.path.join(parent_dir, 'LogoDetector', 'src')
-    
-    # Debug: print paths
-    print(f"Color path: {color_path}")
-    print(f"Typography path: {typography_path}")
-    print(f"Copywriting path: {copywriting_path}")
-    print(f"Logo path: {logo_path}")
-    
-    # Add paths to Python path
-    sys.path.insert(0, color_path)
-    sys.path.insert(0, typography_path)
-    sys.path.insert(0, copywriting_path)
-    sys.path.insert(0, logo_path)
-    
-    # Now try to import the models one by one with error handling
-    imported_models = {}
-    
-    try:
-        # Use importlib to avoid namespace conflicts
-        import importlib.util
-        color_palette_path = os.path.join(color_path, 'brandguard', 'core', 'color_palette.py')
-        if os.path.exists(color_palette_path):
-            spec = importlib.util.spec_from_file_location("color_palette", color_palette_path)
-            color_palette_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(color_palette_module)
-            ColorPaletteExtractor = color_palette_module.ColorPaletteExtractor
-            imported_models['ColorPaletteExtractor'] = ColorPaletteExtractor
-            print("✅ ColorPaletteExtractor imported successfully using importlib")
-        else:
-            print(f"❌ ColorPaletteExtractor file not found at: {color_palette_path}")
-            ColorPaletteExtractor = None
-    except Exception as e:
-        print(f"❌ ColorPaletteExtractor import failed: {e}")
-        ColorPaletteExtractor = None
-    
-    try:
-        # Use importlib to avoid namespace conflicts
-        import importlib.util
-        contrast_checker_path = os.path.join(color_path, 'brandguard', 'core', 'contrast_checker.py')
-        if os.path.exists(contrast_checker_path):
-            spec = importlib.util.spec_from_file_location("contrast_checker", contrast_checker_path)
-            contrast_checker_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(contrast_checker_module)
-            ContrastChecker = contrast_checker_module.ContrastChecker
-            imported_models['ContrastChecker'] = ContrastChecker
-            print("✅ ContrastChecker imported successfully using importlib")
-        else:
-            print(f"❌ ContrastChecker file not found at: {contrast_checker_path}")
-            ContrastChecker = None
-    except Exception as e:
-        print(f"❌ ContrastChecker import failed: {e}")
-        ContrastChecker = None
-    
-    try:
-        # Use importlib to avoid namespace conflicts
-        import importlib.util
-        font_identifier_path = os.path.join(typography_path, 'brandguard', 'core', 'font_identifier.py')
-        if os.path.exists(font_identifier_path):
-            spec = importlib.util.spec_from_file_location("font_identifier", font_identifier_path)
-            font_identifier_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(font_identifier_module)
-            FontIdentifier = font_identifier_module.FontIdentifier
-            imported_models['FontIdentifier'] = FontIdentifier
-            print("✅ FontIdentifier imported successfully using importlib")
-        else:
-            print(f"❌ FontIdentifier file not found at: {font_identifier_path}")
-            FontIdentifier = None
-    except Exception as e:
-        print(f"❌ FontIdentifier import failed: {e}")
-        FontIdentifier = None
-    
-    try:
-        # Use importlib to avoid namespace conflicts
-        import importlib.util
-        text_extractor_path = os.path.join(typography_path, 'brandguard', 'core', 'text_extractor.py')
-        if os.path.exists(text_extractor_path):
-            spec = importlib.util.spec_from_file_location("text_extractor", text_extractor_path)
-            text_extractor_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(text_extractor_module)
-            TextExtractor = text_extractor_module.TextExtractor
-            imported_models['TextExtractor'] = TextExtractor
-            print("✅ TextExtractor imported successfully using importlib")
-        else:
-            print(f"❌ TextExtractor file not found at: {text_extractor_path}")
-            TextExtractor = None
-    except Exception as e:
-        print(f"❌ TextExtractor import failed: {e}")
-        TextExtractor = None
-    
-    try:
-        # Use importlib to avoid namespace conflicts
-        import importlib.util
-        typography_validator_path = os.path.join(typography_path, 'brandguard', 'core', 'typography_validator.py')
-        if os.path.exists(typography_validator_path):
-            spec = importlib.util.spec_from_file_location("typography_validator", typography_validator_path)
-            typography_validator_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(typography_validator_module)
-            TypographyValidator = typography_validator_module.TypographyValidator
-            imported_models['TypographyValidator'] = TypographyValidator
-            print("✅ TypographyValidator imported successfully using importlib")
-        else:
-            print(f"❌ TypographyValidator file not found at: {typography_validator_path}")
-            TypographyValidator = None
-    except Exception as e:
-        print(f"❌ TypographyValidator import failed: {e}")
-        TypographyValidator = None
-    
-    try:
-        # Use importlib to avoid namespace conflicts
-        import importlib.util
-        tone_analyzer_path = os.path.join(copywriting_path, 'brandguard', 'core', 'tone_analyzer.py')
-        if os.path.exists(tone_analyzer_path):
-            spec = importlib.util.spec_from_file_location("tone_analyzer", tone_analyzer_path)
-            tone_analyzer_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(tone_analyzer_module)
-            ToneAnalyzer = tone_analyzer_module.ToneAnalyzer
-            imported_models['ToneAnalyzer'] = ToneAnalyzer
-            print("✅ ToneAnalyzer imported successfully using importlib")
-        else:
-            print(f"❌ ToneAnalyzer file not found at: {tone_analyzer_path}")
-            ToneAnalyzer = None
-    except Exception as e:
-        print(f"❌ ToneAnalyzer import failed: {e}")
-        ToneAnalyzer = None
-    
-    try:
-        # Use importlib to avoid namespace conflicts
-        import importlib.util
-        copywriting_text_extractor_path = os.path.join(copywriting_path, 'brandguard', 'core', 'text_extractor.py')
-        if os.path.exists(copywriting_text_extractor_path):
-            spec = importlib.util.spec_from_file_location("copywriting_text_extractor", copywriting_text_extractor_path)
-            copywriting_text_extractor_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(copywriting_text_extractor_module)
-            CopywritingTextExtractor = copywriting_text_extractor_module.TextExtractor
-            imported_models['CopywritingTextExtractor'] = CopywritingTextExtractor
-            print("✅ CopywritingTextExtractor imported successfully using importlib")
-        else:
-            print(f"❌ CopywritingTextExtractor file not found at: {copywriting_text_extractor_path}")
-            CopywritingTextExtractor = None
-    except Exception as e:
-        print(f"❌ CopywritingTextExtractor import failed: {e}")
-        CopywritingTextExtractor = None
-    
-    try:
-        # Use importlib to avoid namespace conflicts
-        import importlib.util
-        brand_voice_validator_path = os.path.join(copywriting_path, 'brandguard', 'core', 'brand_voice_validator.py')
-        if os.path.exists(brand_voice_validator_path):
-            spec = importlib.util.spec_from_file_location("brand_voice_validator", brand_voice_validator_path)
-            brand_voice_validator_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(brand_voice_validator_module)
-            BrandVoiceValidator = brand_voice_validator_module.BrandVoiceValidator
-            imported_models['BrandVoiceValidator'] = BrandVoiceValidator
-            print("✅ BrandVoiceValidator imported successfully using importlib")
-        else:
-            print(f"❌ BrandVoiceValidator file not found at: {brand_voice_validator_path}")
-            BrandVoiceValidator = None
-    except Exception as e:
-        print(f"❌ BrandVoiceValidator import failed: {e}")
-        BrandVoiceValidator = None
-    
-    try:
-        # Import LogoDetector directly from LogoDetector folder
-        # The logo_path should already be in sys.path from above
-        from brandguard.core.detector import LogoDetector
-        from brandguard.core.validator import LogoPlacementValidator
-        from brandguard.core.pdf_processor import PDFImageExtractor, PDFLogoDetector
-        imported_models['LogoDetector'] = LogoDetector
-        imported_models['LogoPlacementValidator'] = LogoPlacementValidator
-        imported_models['PDFImageExtractor'] = PDFImageExtractor
-        imported_models['PDFLogoDetector'] = PDFLogoDetector
-        print("✅ LogoDetector and related classes imported successfully from LogoDetector folder")
-    except Exception as e:
-        print(f"❌ LogoDetector import failed: {e}")
-        # Try alternative import method
-        try:
-            import importlib.util
-            logo_detector_path = os.path.join(logo_path, 'brandguard', 'core', 'detector.py')
-            if os.path.exists(logo_detector_path):
-                spec = importlib.util.spec_from_file_location("logo_detector", logo_detector_path)
-                logo_detector_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(logo_detector_module)
-                LogoDetector = logo_detector_module.LogoDetector
-                imported_models['LogoDetector'] = LogoDetector
-                print("✅ LogoDetector imported successfully using importlib fallback")
-            else:
-                print(f"❌ LogoDetector file not found at: {logo_detector_path}")
-                LogoDetector = None
-        except Exception as e2:
-            print(f"❌ LogoDetector importlib fallback also failed: {e2}")
-            LogoDetector = None
-        LogoPlacementValidator = None
-        PDFImageExtractor = None
-        PDFLogoDetector = None
-    
-    # LogoValidator is now imported above as LogoPlacementValidator
-    LogoValidator = LogoPlacementValidator
-    
-    # Check if we have at least some models loaded
-    if len(imported_models) > 0:
-        MODELS_LOADED = True
-        logger = logging.getLogger(__name__)
-        logger.info(f"Some real models imported successfully: {list(imported_models.keys())}")
-    else:
-        MODELS_LOADED = False
-        logger = logging.getLogger(__name__)
-        logger.warning("No real models could be imported. Using fallback implementations.")
-    
-except Exception as e:
-    MODELS_LOADED = False
-    logger = logging.getLogger(__name__)
-    logger.warning(f"Error during model import: {e}. Using fallback implementations.")
+# Use model_imports for self-contained model loading
+from .model_imports import import_all_models, get_imported_models, is_models_loaded
+
+# Import models using the self-contained import system
+MODELS_LOADED, imported_models = import_all_models()
 
 logger = logging.getLogger(__name__)
-
-# Note: FontIdentifier and ToneAnalyzer require heavy ML libraries (torch, transformers)
-# These are not installed by default to keep the pipeline lightweight
-# Users can install them separately if needed for full functionality
-logger.info("💡 Note: Some models require additional ML libraries (torch, transformers)")
-logger.info("   Install them separately for full typography and copywriting analysis")
+logger.info("💡 Using self-contained model implementations within consolidated_pipeline")
 
 class PipelineOrchestrator:
     """
@@ -317,8 +92,12 @@ class PipelineOrchestrator:
                 logger.warning("⚠️ TextExtractor not available, using fallback")
             
             if FontIdentifier is not None:
-                self.font_identifier = FontIdentifier()
-                logger.info("✅ FontIdentifier initialized with real model")
+                try:
+                    self.font_identifier = FontIdentifier(lang=self.lang)
+                    logger.info("✅ MultilingualFontIdentifier initialized with real model")
+                except Exception as e:
+                    logger.warning(f"⚠️ FontIdentifier initialization failed: {e}")
+                    self.font_identifier = None
             else:
                 logger.warning("⚠️ FontIdentifier not available, using fallback")
             
@@ -436,15 +215,33 @@ class PipelineOrchestrator:
             Comprehensive analysis results from all models
         """
         try:
+            # CRITICAL: Defensive assert - image URLs must NEVER reach url_analysis
+            # This prevents routing bugs from causing incorrect analysis
+            # Check both full path and URL path (for URLs with query parameters)
+            if input_source:
+                input_lower = str(input_source).lower()
+                url_path = input_lower.split('?')[0] if '?' in input_lower else input_lower
+                image_extensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff']
+                is_image = any(input_lower.endswith(ext) for ext in image_extensions) or \
+                          any(url_path.endswith(ext) for ext in image_extensions)
+                
+                if is_image:
+                    assert source_type == 'image', (
+                        f"CRITICAL ROUTING BUG: Image URL/file '{input_source[:100]}' routed to "
+                        f"'{source_type}' instead of 'image'. This must never happen!"
+                    )
+            
             # Generate unique analysis ID
             self.current_analysis_id = f"analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             
             # Initialize results structure
+            # CRITICAL: source_type is set ONCE here and trusted everywhere else
             self.analysis_results = {
                 'analysis_id': self.current_analysis_id,
                 'timestamp': datetime.now().isoformat(),
                 'input_source': input_source,
-                'source_type': source_type,
+                'source_type': source_type,  # Set ONCE, trusted everywhere
+                'analysis_type': f'{source_type}_analysis',  # Set ONCE, trusted everywhere
                 'overall_compliance_score': 0.0,
                 'model_results': {},
                 'summary': {},
@@ -452,8 +249,26 @@ class PipelineOrchestrator:
             }
             
             # Perform analysis based on source type
+            # CRITICAL: Image URLs must use the same pipeline as uploaded images
             if source_type == 'image':
-                results = self._analyze_image(input_source, analysis_options)
+                # Check if input_source is a URL (starts with http)
+                if input_source.startswith('http://') or input_source.startswith('https://'):
+                    # Image URL - download and analyze using same pipeline as uploads
+                    logger.info(f"[Routing] Image URL detected, using image analysis pipeline: {input_source[:100]}")
+                    results = self._analyze_image_from_url(input_source, analysis_options)
+                else:
+                    # Local file path - analyze directly
+                    results = self._analyze_image(input_source, analysis_options)
+            elif source_type == 'url':
+                # Non-image URL (e.g., HTML webpage) - not yet implemented
+                # Return explicit "not_supported" response, NOT placeholder compliance scores
+                logger.warning(f"[Routing] Non-image URL detected (not supported): {input_source[:100]}")
+                return {
+                    'status': 'not_supported',
+                    'message': 'This input type is not yet supported',
+                    'analysis_id': self.current_analysis_id,
+                    'timestamp': datetime.now().isoformat()
+                }
             elif source_type == 'document':
                 results = self._analyze_document(input_source, analysis_options)
             elif source_type == 'text':
@@ -461,10 +276,30 @@ class PipelineOrchestrator:
             else:
                 raise ValueError(f"Unsupported source type: {source_type}")
             
-            # Calculate overall compliance score
+            # Safety guardrail: Validate that analysis actually ran
+            # Check if any analysis modules produced results
+            model_results = self.analysis_results.get('model_results', {})
+            has_results = any(
+                model_results.get('color_analysis') or
+                model_results.get('typography_analysis') or
+                model_results.get('copywriting_analysis') or
+                model_results.get('logo_analysis')
+            )
+            
+            if not has_results:
+                # No analysis ran - return not_supported instead of placeholder scores
+                logger.warning(f"[Routing] No analysis modules ran for source_type: {source_type}")
+                return {
+                    'status': 'not_supported',
+                    'message': 'This input type is not yet supported',
+                    'analysis_id': self.current_analysis_id,
+                    'timestamp': datetime.now().isoformat()
+                }
+            
+            # Calculate overall compliance score (only if analysis ran)
             self._calculate_overall_compliance()
             
-            # Generate summary and recommendations
+            # Generate summary and recommendations (only if analysis ran)
             self._generate_summary_and_recommendations()
             
             return self.analysis_results
@@ -478,44 +313,161 @@ class PipelineOrchestrator:
             }
     
     def _analyze_image(self, image_path: str, analysis_options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Analyze image using all models"""
+        """Analyze image using all models - PARALLELIZED for performance"""
         try:
             # Validate image file
             if not os.path.exists(image_path):
                 raise FileNotFoundError(f"Image file not found: {image_path}")
             
-            # Load image
+            # Load image once
             image = cv2.imread(image_path)
             if image is None:
                 raise ValueError(f"Failed to load image: {image_path}")
             
-            logger.info(f"Analyzing image: {image_path}")
+            logger.info(f"Analyzing image: {image_path} (parallel mode)")
+            start_time = datetime.now()
             
-            # 1. Color Analysis (if enabled)
-            if analysis_options.get('color_analysis', {}).get('enabled', True):
-                color_results = self._perform_color_analysis(image, analysis_options.get('color_analysis', {}))
-                self.analysis_results['model_results']['color_analysis'] = color_results
+            # Prepare analysis tasks
+            tasks = {}
+            results = {}
             
-            # 2. Typography Analysis (if enabled)
-            if analysis_options.get('typography_analysis', {}).get('enabled', True):
-                typography_results = self._perform_typography_analysis(image, analysis_options.get('typography_analysis', {}))
-                self.analysis_results['model_results']['typography_analysis'] = typography_results
+            # Create thread pool for parallel execution (max 4 workers for 4 analysis types)
+            with ThreadPoolExecutor(max_workers=4, thread_name_prefix="analysis") as executor:
+                # Submit all analysis tasks in parallel
+                if analysis_options.get('color_analysis', {}).get('enabled', True):
+                    tasks['color'] = executor.submit(
+                        self._perform_color_analysis, 
+                        image.copy(),  # Copy to avoid race conditions
+                        analysis_options.get('color_analysis', {})
+                    )
+                
+                if analysis_options.get('typography_analysis', {}).get('enabled', True):
+                    tasks['typography'] = executor.submit(
+                        self._perform_typography_analysis,
+                        image.copy(),
+                        analysis_options.get('typography_analysis', {})
+                    )
+                
+                if analysis_options.get('copywriting_analysis', {}).get('enabled', True):
+                    tasks['copywriting'] = executor.submit(
+                        self._perform_copywriting_analysis,
+                        image.copy(),
+                        analysis_options.get('copywriting_analysis', {}),
+                        'image'
+                    )
+                
+                if analysis_options.get('logo_analysis', {}).get('enabled', True):
+                    tasks['logo'] = executor.submit(
+                        self._perform_logo_detection_analysis,
+                        image.copy(),
+                        analysis_options.get('logo_analysis', {})
+                    )
+                
+                # Collect results as they complete
+                for task_name, future in tasks.items():
+                    try:
+                        task_start = datetime.now()
+                        result = future.result(timeout=300)  # 5 min timeout per task
+                        task_duration = (datetime.now() - task_start).total_seconds()
+                        results[task_name] = result
+                        logger.info(f"[Performance] {task_name} analysis completed in {task_duration:.2f}s")
+                    except Exception as e:
+                        logger.error(f"[Performance] {task_name} analysis failed: {e}", exc_info=True)
+                        results[task_name] = {'error': str(e)}
             
-            # 3. Copywriting Analysis (if enabled)
-            if analysis_options.get('copywriting_analysis', {}).get('enabled', True):
-                copywriting_results = self._perform_copywriting_analysis(image, analysis_options.get('copywriting_analysis', {}))
-                self.analysis_results['model_results']['copywriting_analysis'] = copywriting_results
+            # Map results to expected structure
+            if 'color' in results:
+                self.analysis_results['model_results']['color_analysis'] = results['color']
+            if 'typography' in results:
+                self.analysis_results['model_results']['typography_analysis'] = results['typography']
+            if 'copywriting' in results:
+                self.analysis_results['model_results']['copywriting_analysis'] = results['copywriting']
+            if 'logo' in results:
+                self.analysis_results['model_results']['logo_analysis'] = results['logo']
             
-            # 4. Logo Detection Analysis (if enabled)
-            if analysis_options.get('logo_analysis', {}).get('enabled', True):
-                logo_results = self._perform_logo_detection_analysis(image, analysis_options.get('logo_analysis', {}))
-                self.analysis_results['model_results']['logo_analysis'] = logo_results
+            total_duration = (datetime.now() - start_time).total_seconds()
+            logger.info(f"[Performance] Total analysis completed in {total_duration:.2f}s (parallel mode)")
             
             return self.analysis_results
             
         except Exception as e:
-            logger.error(f"Image analysis failed: {e}")
+            logger.error(f"Image analysis failed: {e}", exc_info=True)
             raise
+    
+    def _analyze_image_from_url(self, image_url: str, analysis_options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Download image from URL and analyze it using the EXACT SAME pipeline as uploaded images.
+        This ensures image URLs are treated identically to file uploads.
+        """
+        import tempfile
+        import shutil
+        
+        temp_file = None
+        try:
+            logger.info(f"[Routing] Downloading image from URL: {image_url[:100]}...")
+            start_download = datetime.now()
+            
+            # Download image from URL with content-type checking
+            response = requests.get(image_url, timeout=30, stream=True)
+            response.raise_for_status()
+            
+            # CRITICAL: Verify this is actually an image, not HTML
+            content_type = response.headers.get('content-type', '').lower()
+            if 'text/html' in content_type or 'application/xhtml' in content_type:
+                # This is HTML, not an image - return not_supported
+                logger.warning(f"[Routing] URL points to HTML, not an image: {image_url[:100]}")
+                return {
+                    'status': 'not_supported',
+                    'message': 'This input type is not yet supported',
+                    'analysis_id': self.current_analysis_id,
+                    'timestamp': datetime.now().isoformat()
+                }
+            
+            # Determine file extension from URL or content type
+            if 'jpeg' in content_type or 'jpg' in content_type:
+                ext = '.jpg'
+            elif 'png' in content_type:
+                ext = '.png'
+            elif 'gif' in content_type:
+                ext = '.gif'
+            elif 'webp' in content_type:
+                ext = '.webp'
+            else:
+                # Try to get from URL
+                url_lower = image_url.lower()
+                if url_lower.endswith('.jpg') or url_lower.endswith('.jpeg'):
+                    ext = '.jpg'
+                elif url_lower.endswith('.png'):
+                    ext = '.png'
+                elif url_lower.endswith('.gif'):
+                    ext = '.gif'
+                elif url_lower.endswith('.webp'):
+                    ext = '.webp'
+                else:
+                    ext = '.jpg'  # Default
+            
+            # Save to temporary file
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            shutil.copyfileobj(response.raw, temp_file)
+            temp_file.close()
+            
+            download_duration = (datetime.now() - start_download).total_seconds()
+            logger.info(f"[Performance] Image downloaded in {download_duration:.2f}s from URL")
+            
+            # CRITICAL: Use the EXACT SAME image analysis pipeline as file uploads
+            # This ensures zero behavioral difference between uploaded images and image URLs
+            return self._analyze_image(temp_file.name, analysis_options)
+            
+        except Exception as e:
+            logger.error(f"Failed to download or analyze image from URL: {e}", exc_info=True)
+            raise
+        finally:
+            # Clean up temporary file
+            if temp_file and os.path.exists(temp_file.name):
+                try:
+                    os.unlink(temp_file.name)
+                except Exception as e:
+                    logger.warning(f"Failed to delete temp file: {e}")
     
     def _analyze_document(self, document_path: str, analysis_options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Analyze document using all models"""
@@ -868,9 +820,34 @@ class PipelineOrchestrator:
                     # YOLOv8 Detection
                     start_time = datetime.now()
                     
-                    logo_detections = self.logo_detector.detect_logos(image)
-
+                    raw_logo_detections = self.logo_detector.detect_logos(image)
                     
+                    # Apply deterministic filtering to reduce false positives
+                    try:
+                        from ..filters import filter_logo_candidates
+                        
+                        # Validate image shape
+                        if len(image.shape) < 2:
+                            logger.error(f"Invalid image shape: {image.shape}")
+                            logo_detections = raw_logo_detections or []
+                        else:
+                            image_height, image_width = image.shape[:2]
+                            filter_config = {
+                                'logoConfidenceThreshold': confidence_threshold,
+                                'minLogoSize': options.get('min_logo_size', 0.01),
+                                'maxLogoSize': options.get('max_logo_size', 0.25),
+                                'allowedZones': options.get('allowed_zones', [])
+                            }
+                            logo_detections = filter_logo_candidates(
+                                raw_logo_detections or [],
+                                image_width,
+                                image_height,
+                                filter_config
+                            )
+                    except Exception as e:
+                        logger.error(f"Error in logo filtering, using raw detections: {e}", exc_info=True)
+                        # Fallback to raw detections if filtering fails
+                        logo_detections = raw_logo_detections or []
                     
                     # Validate logo placement if enabled
                     placement_validation = {}
