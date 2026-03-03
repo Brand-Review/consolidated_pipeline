@@ -28,6 +28,8 @@ from werkzeug.utils import secure_filename
 
 from src.brandguard.config.settings import Settings
 from src.brandguard.core.pipeline_orchestrator_new import PipelineOrchestrator
+from src.brandguard.core.config_validator import evaluate_config_state, build_block_response
+from src.brandguard.services.brand_extractor import BrandExtractor
 
 # Configure logging
 logging.basicConfig(
@@ -47,6 +49,39 @@ try:
 except Exception as e:
     logger.error(f"Failed to load settings: {e}")
     settings = None
+
+# Validate Google Cloud Vision credentials at startup
+# CRITICAL: Raises hard error if credentials are missing or invalid
+try:
+    from src.brandguard.utils.google_credentials_validator import validate_google_credentials
+    # Check if we're in debug/development mode (allow graceful fallback)
+    debug_mode = os.getenv('FLASK_ENV') == 'development' or os.getenv('FLASK_DEBUG') == '1' or os.getenv('DEBUG') == '1'
+    
+    if debug_mode:
+        # In debug mode, log warning but allow server to start
+        is_valid, error_msg = validate_google_credentials(raise_on_error=False)
+        if not is_valid:
+            logger.warning(f"⚠️  Google Cloud Vision credentials validation failed:\n{error_msg}")
+            logger.warning("⚠️  Server will start but Google OCR will not function.")
+            logger.warning("   The system will fallback to PaddleOCR if available.")
+        else:
+            logger.info("✅ Google Cloud Vision credentials validated successfully")
+    else:
+        # In production mode, raise hard error
+        validate_google_credentials(raise_on_error=True)
+        logger.info("✅ Google Cloud Vision credentials validated successfully")
+except ImportError:
+    logger.warning("⚠️  Google credentials validator not available - skipping validation")
+except RuntimeError as e:
+    # Hard error - credentials validation failed
+    logger.critical(f"❌ CRITICAL: Google Cloud Vision credentials validation failed:\n{e}")
+    logger.critical("❌ Server startup aborted due to missing/invalid Google credentials.")
+    raise
+except Exception as e:
+    logger.error(f"⚠️  Google credentials validation error: {e}")
+    # In production, fail hard on unexpected errors too
+    if not (os.getenv('FLASK_ENV') == 'development' or os.getenv('FLASK_DEBUG') == '1'):
+        raise
 
 # Initialize pipeline orchestrator
 pipeline = None
@@ -94,6 +129,50 @@ def get_file_type(filename: str) -> str:
     else:
         return 'unknown'
 
+def determine_analysis_type(input_source: str) -> str:
+    """
+    Determine analysis type based on input source.
+    CRITICAL: Image URLs must be treated as images, not URLs.
+    
+    Rules:
+    - If input_source ends with image extension (.png, .jpg, etc.) → "image"
+    - If input_source is HTTP/HTTPS URL with image extension → "image"
+    - If input_source is HTTP/HTTPS URL → check content-type or default to "image"
+    - Only return "url" for real webpages (HTML) - not yet implemented
+    - Default fallback → "image" (safe default for image URLs)
+    
+    This function is deterministic and testable.
+    """
+    if not input_source:
+        return 'image'  # Safe default
+    
+    input_lower = input_source.lower().strip()
+    
+    # CRITICAL: For URLs with query parameters, check path before '?'
+    # Example: https://example.com/image.png?X-Amz-Signature=... should be detected as image
+    url_path = input_lower
+    if '?' in input_lower:
+        url_path = input_lower.split('?')[0]
+    
+    # Check file extension first (most reliable)
+    # Check both full input and URL path (for URLs with query params)
+    image_extensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff']
+    if any(input_lower.endswith(ext) for ext in image_extensions) or \
+       any(url_path.endswith(ext) for ext in image_extensions):
+        return 'image'
+    
+    # Check if it's a URL
+    if input_lower.startswith('http://') or input_lower.startswith('https://'):
+        # For URLs, we need to check content-type
+        # Since we can't check content-type synchronously here without downloading,
+        # we'll default to 'image' for URLs (most URLs passed are image URLs)
+        # The pipeline will handle actual content-type checking during download
+        logger.info(f"[Routing] URL detected, defaulting to image analysis: {input_source[:100]}")
+        return 'image'
+    
+    # Default to image (safe fallback)
+    return 'image'
+
 @app.route('/')
 def index():
     """Main page"""
@@ -120,13 +199,39 @@ def analyze_content():
     try:
         if not pipeline:
             return jsonify({'error': 'Pipeline not initialized'}), 503
+
+        config_payload = {
+            "brandName": request.form.get("brandName", "").strip(),
+            "brandPurpose": request.form.get("brandPurpose", "").strip(),
+            "industry": request.form.get("industry", "").strip(),
+            "logoUploaded": request.form.get("logoUploaded", "false").lower() == "true",
+            "brandFonts": request.form.get("brandFonts", request.form.get("expected_fonts", "")).strip(),
+            "brandColors": request.form.get("brandColors", request.form.get("primary_colors", "")).strip(),
+            "brandColorPalette": request.form.get("brandColorPalette", request.form.get("brand_palette", "")).strip(),
+        }
+        config_result = evaluate_config_state(config_payload)
+        config_state = config_result["configState"]
+        analysis_mode = config_result["analysisMode"]
+
+        # V1 RULE: Block ONLY if BOTH brandName AND brandPurpose are missing
+        if config_state == "not_configured":
+            return jsonify(build_block_response(config_state)), 400
         
-        # Get input type
+        # V1 RULE: Remove partial_configured block - allow upload with observational mode
+        # (No confirmation required - proceed with analysis)
+        
+        analysis_options = request.form.to_dict(flat=True)
+        analysis_options["analysisMode"] = analysis_mode
+        analysis_options["configState"] = config_state
         input_type = request.form.get('input_type', 'file')
 
         
         
         # Handle different input types
+        # CRITICAL: Determine analysis type BEFORE any branching or saving
+        input_source = None
+        source_type = None
+        
         if input_type == 'file':
             # File upload
             if 'file' not in request.files:
@@ -147,10 +252,10 @@ def analyze_content():
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
             file.save(filepath)
             
-            # Determine source type
-            source_type = get_file_type(filename)
-            
             input_source = filepath
+            # CRITICAL: Use determine_analysis_type for consistency (handles both files and URLs)
+            # This ensures uploaded images and image URLs use the same logic
+            source_type = determine_analysis_type(filepath)
             
         elif input_type == 'text':
             # Direct text input
@@ -162,15 +267,56 @@ def analyze_content():
             source_type = 'text'
             
         elif input_type == 'url':
-            # URL input
+            # URL input - CRITICAL: Determine if URL is an image
             url = request.form.get('url', '').strip()
             if not url:
                 return jsonify({'error': 'No URL provided'}), 400
             
             input_source = url
-            source_type = 'url'
+            # CRITICAL: Use determine_analysis_type BEFORE any branching
+            # This ensures image URLs route to image_analysis, not url_analysis
+            source_type = determine_analysis_type(url)
+            logger.info(f"[Routing] URL input detected: '{url[:100]}', routing to: {source_type} analysis")
             
-        else:
+            # CRITICAL: Defensive check - if URL is clearly an image, force source_type to 'image'
+            url_lower = url.lower()
+            url_path = url_lower.split('?')[0] if '?' in url_lower else url_lower
+            image_extensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff']
+            is_image_url = any(url_path.endswith(ext) for ext in image_extensions)
+            
+            if is_image_url and source_type != 'image':
+                logger.error(
+                    f"[Routing] CRITICAL BUG: Image URL '{url[:100]}' was incorrectly routed to "
+                    f"'{source_type}'. Forcing correction to 'image'."
+                )
+                source_type = 'image'
+        
+        # CRITICAL: Defensive assert - image URLs must NEVER reach url_analysis
+        # This prevents routing bugs from causing incorrect analysis
+        # Check both full path and URL path (for URLs with query parameters)
+        if input_source:
+            input_lower = input_source.lower()
+            url_path = input_lower.split('?')[0] if '?' in input_lower else input_lower
+            image_extensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff']
+            is_image = any(input_lower.endswith(ext) for ext in image_extensions) or \
+                      any(url_path.endswith(ext) for ext in image_extensions)
+            
+            if is_image:
+                assert source_type == 'image', (
+                    f"CRITICAL ROUTING BUG: Image URL/file '{input_source[:100]}' routed to "
+                    f"'{source_type}' instead of 'image'. This must never happen!"
+                )
+        
+        # CRITICAL: Ensure source_type is set ONCE and trusted everywhere else
+        if not source_type:
+            logger.error(f"[Routing] source_type not determined for input: {input_source[:100]}")
+            return jsonify({'error': 'Failed to determine analysis type'}), 500
+        
+        # Log the final routing decision
+        logger.info(f"[Routing] Final routing decision: input_source='{input_source[:100]}', source_type='{source_type}'")
+        
+        # Handle unsupported input types
+        if input_source is None:
             return jsonify({'error': f'Unsupported input type: {input_type}'}), 400
         
         # Get analysis options
@@ -178,6 +324,8 @@ def analyze_content():
                     'analysis_priority': request.form.get('analysis_priority', 'balanced'),
                     'report_detail': request.form.get('report_detail', 'detailed'), # detailed, summary, comprehensive
                    'include_recommendations': request.form.get('include_recommendations', 'true').lower() == 'true', # true, false
+                   'analysisMode': analysis_mode,
+                   'configState': config_state,
                    'color_analysis': {
                        'enabled': request.form.get('enable_color', 'true').lower() == 'true',
                        'n_colors': int(request.form.get('color_n_colors', 8)),
@@ -233,13 +381,79 @@ def analyze_content():
                }
         
         # Perform comprehensive analysis
-        logger.info(f"Starting analysis for {source_type}: {input_source}")
+        logger.info(f"[Routing] Starting analysis - input_source: '{input_source[:100] if input_source else 'None'}', source_type: '{source_type}'")
+        
+        # CRITICAL: Final validation before calling pipeline
+        # This is the last chance to catch routing errors before they reach the orchestrator
+        if input_source:
+            input_lower = str(input_source).lower()
+            url_path = input_lower.split('?')[0] if '?' in input_lower else input_lower
+            image_extensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff']
+            is_image = any(input_lower.endswith(ext) for ext in image_extensions) or \
+                      any(url_path.endswith(ext) for ext in image_extensions)
+            
+            if is_image and source_type != 'image':
+                logger.error(
+                    f"[Routing] CRITICAL BUG DETECTED: Image URL '{input_source[:100]}' has source_type='{source_type}' "
+                    f"instead of 'image'. FORCING correction before calling pipeline!"
+                )
+                source_type = 'image'
         
         analysis_results = pipeline.analyze_content(
             input_source=input_source,
             source_type=source_type,
             analysis_options=analysis_options
         )
+        
+        # CRITICAL: Final validation - ensure response has correct routing
+        # This is a last-ditch fix in case the orchestrator didn't catch it
+        if input_source and analysis_results:
+            input_lower = str(input_source).lower()
+            url_path = input_lower.split('?')[0] if '?' in input_lower else input_lower
+            image_extensions = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff']
+            is_image = any(input_lower.endswith(ext) for ext in image_extensions) or \
+                      any(url_path.endswith(ext) for ext in image_extensions)
+            
+            if is_image:
+                # Force correct routing in response
+                if analysis_results.get('source_type') != 'image' or \
+                   analysis_results.get('analysis_type') != 'image_analysis':
+                    logger.error(
+                        f"[Routing] CRITICAL: Response has wrong routing! "
+                        f"source_type={analysis_results.get('source_type')}, "
+                        f"analysis_type={analysis_results.get('analysis_type')}. FORCING correction!"
+                    )
+                    analysis_results['source_type'] = 'image'
+                    analysis_results['analysis_type'] = 'image_analysis'
+                    # Remove any old url_analysis fields - check multiple possible locations
+                    response_message = analysis_results.get('message') or analysis_results.get('results', {}).get('message')
+                    if response_message and 'URL analysis not yet implemented' in str(response_message):
+                        logger.error(f"[Routing] Found old message in response! Removing it. Message was: {response_message}")
+                        if 'message' in analysis_results:
+                            analysis_results.pop('message', None)
+                        if 'results' in analysis_results and isinstance(analysis_results['results'], dict) and 'message' in analysis_results['results']:
+                            analysis_results['results'].pop('message', None)
+                    
+                    # Also check and remove any old url_analysis summary
+                    response_summary = analysis_results.get('summary') or (analysis_results.get('results', {}) or {}).get('summary')
+                    if isinstance(response_summary, str) and 'Poor brand compliance' in response_summary and analysis_results.get('overall_compliance') == 0:
+                        logger.warning(f"[Routing] Found placeholder summary in response. Clearing it.")
+                        analysis_results['summary'] = {}
+        
+        # CRITICAL: Validate response - if it's a not_supported response, return it immediately
+        if analysis_results.get('status') == 'not_supported':
+            logger.warning(f"[Routing] Analysis returned not_supported: {analysis_results.get('message')}")
+            return jsonify({
+                'status': 'not_supported',
+                'message': analysis_results.get('message', 'This input type is not yet supported')
+            }), 400
+        
+        # Safety guardrail: Check if analysis is not supported
+        if analysis_results.get('status') == 'not_supported':
+            return jsonify({
+                'status': 'not_supported',
+                'message': analysis_results.get('message', 'This input type is not yet supported')
+            }), 400
         
         if 'error' in analysis_results:
             return jsonify(analysis_results), 500
@@ -257,8 +471,18 @@ def analyze_content():
         })
         
     except Exception as e:
-        logger.error(f"Analysis failed: {str(e)}")
-        return jsonify({'error': f'Analysis failed: {str(e)}'}), 500
+        import traceback
+        error_traceback = traceback.format_exc()
+        logger.error(f"Analysis failed: {str(e)}\n{error_traceback}")
+        # Return generic error to client, but log full traceback
+        return jsonify({
+            'success': False,
+            'error': {
+                'message': 'Internal server error',
+                'code': 'UNKNOWN_ERROR',
+                'statusCode': 500
+            }
+        }), 500
 
 @app.route('/api/analyze/color', methods=['POST'])
 def analyze_colors():
@@ -284,6 +508,8 @@ def analyze_colors():
         
         # Get color analysis options
         analysis_options = {
+            'analysisMode': analysis_mode,
+            'configState': config_state,
             'color_analysis': {
                 'n_colors': int(request.form.get('n_colors', 8)),
                 'n_clusters': int(request.form.get('n_clusters', 8)),
@@ -330,6 +556,26 @@ def analyze_typography():
     try:
         if not pipeline:
             return jsonify({'error': 'Pipeline not initialized'}), 503
+
+        config_payload = {
+            "brandName": request.form.get("brandName", "").strip(),
+            "brandPurpose": request.form.get("brandPurpose", "").strip(),
+            "industry": request.form.get("industry", "").strip(),
+            "logoUploaded": request.form.get("logoUploaded", "false").lower() == "true",
+            "brandFonts": request.form.get("brandFonts", request.form.get("expected_fonts", "")).strip(),
+            "brandColors": request.form.get("brandColors", request.form.get("primary_colors", "")).strip(),
+            "brandColorPalette": request.form.get("brandColorPalette", request.form.get("brand_palette", "")).strip(),
+        }
+        config_result = evaluate_config_state(config_payload)
+        config_state = config_result["configState"]
+        analysis_mode = config_result["analysisMode"]
+
+        # V1 RULE: Block ONLY if BOTH brandName AND brandPurpose are missing
+        if config_state == "not_configured":
+            return jsonify(build_block_response(config_state)), 400
+        
+        # V1 RULE: Remove partial_configured block - allow upload with observational mode
+        # (No confirmation required - proceed with analysis)
         
         # Handle file upload
         if 'file' not in request.files:
@@ -348,6 +594,8 @@ def analyze_typography():
         
         # Get typography analysis options
         analysis_options = {
+            'analysisMode': analysis_mode,
+            'configState': config_state,
             'typography_analysis': {
                 'merge_regions': request.form.get('merge_regions', 'true').lower() == 'true',
                 'distance_threshold': int(request.form.get('distance_threshold', 20)),
@@ -421,6 +669,8 @@ def analyze_copywriting():
         
         # Get copywriting analysis options
         analysis_options = {
+            'analysisMode': analysis_mode,
+            'configState': config_state,
             'copywriting_analysis': {
                 'include_suggestions': request.form.get('include_suggestions', 'true').lower() == 'true',
                 'include_industry_benchmarks': request.form.get('include_industry_benchmarks', 'true').lower() == 'true',
@@ -492,6 +742,8 @@ def analyze_logos():
         
         # Get logo analysis options
         analysis_options = {
+            'analysisMode': analysis_mode,
+            'configState': config_state,
             'logo_analysis': {
                 'enabled': True,
                 'enable_placement_validation': request.form.get('enable_placement_validation', 'true').lower() == 'true',
@@ -527,6 +779,57 @@ def analyze_logos():
         import traceback
         logger.error(f"Logo analysis traceback: {traceback.format_exc()}")
         return jsonify({'error': f'Logo analysis failed: {str(e)}'}), 500
+
+@app.route('/api/extract-brand-guidelines', methods=['POST'])
+def extract_brand_guidelines():
+    """Extract brand guidelines from uploaded file"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Validate file type
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'File type not supported'}), 400
+        
+        # Save file temporarily
+        filename = secure_filename(file.filename)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        safe_filename = f"{timestamp}_{filename}"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
+        file.save(filepath)
+        
+        try:
+            # Determine file type
+            file_ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+            
+            # Initialize extractor
+            extractor = BrandExtractor()
+            
+            # Extract brand guidelines
+            result = extractor.extract_brand_guidelines(filepath, file_ext)
+            
+            return jsonify(result)
+            
+        finally:
+            # Cleanup temp file
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup temp file: {e}")
+        
+    except Exception as e:
+        logger.error(f"Brand extraction endpoint failed: {e}")
+        import traceback
+        logger.error(f"Brand extraction traceback: {traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/api/status/<analysis_id>')
 def get_analysis_status(analysis_id: str):
@@ -646,7 +949,17 @@ def not_found(e):
 @app.errorhandler(500)
 def internal_error(e):
     """Handle internal server errors"""
-    return jsonify({'error': 'Internal server error'}), 500
+    import traceback
+    error_traceback = traceback.format_exc()
+    logger.error(f"Internal server error: {e}\n{error_traceback}")
+    return jsonify({
+        'success': False,
+        'error': {
+            'message': 'Internal server error',
+            'code': 'UNKNOWN_ERROR',
+            'statusCode': 500
+        }
+    }), 500
 
 def cleanup_resources():
     """Clean up all resources to prevent semaphore leaks"""
@@ -702,14 +1015,18 @@ if __name__ == '__main__':
         logger.info(f"📁 Results directory: {app.config['RESULTS_FOLDER']}")
         logger.info(f"🔧 Pipeline ready: {pipeline is not None}")
         
-        # Run the Flask app with multiprocessing disabled
+        # Run the Flask app with auto-reload enabled in development
+        # Check if running in development mode
+        debug_mode = os.getenv('FLASK_ENV') == 'development' or os.getenv('FLASK_DEBUG') == '1'
+        
         app.run(
-            debug=False,  # Disable debug mode to prevent reloader issues
+            debug=debug_mode,  # Enable debug mode for auto-reload
             host='0.0.0.0',
-            port=5003,
+            port=int(os.getenv('PORT', 5000)),
             threaded=True,
-            use_reloader=True,  # Disable reloader to prevent multiprocessing issues
-            processes=1  # Single process to avoid multiprocessing conflicts
+            use_reloader=debug_mode,  # Auto-reload only in debug mode
+            use_debugger=debug_mode,
+            extra_files=None  # Can add files to watch for changes
         )
         
     except KeyboardInterrupt:

@@ -146,10 +146,25 @@ class Settings:
     cache_ttl: int = 3600  # 1 hour
     max_concurrent_analyses: int = 5
     
+    # External API credentials (loaded from environment or config)
+    google_application_credentials: Optional[str] = None
+    
     def __post_init__(self):
         """Initialize settings after creation"""
+        self._load_environment_variables()
         self._load_configurations()
         self._create_directories()
+    
+    def _load_environment_variables(self):
+        """Load settings from environment variables"""
+        # Google Cloud Vision credentials
+        # Priority: 1) Config file, 2) Environment variable, 3) None
+        if self.google_application_credentials is None:
+            self.google_application_credentials = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+        
+        # Set environment variable if we have it from config
+        if self.google_application_credentials:
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = self.google_application_credentials
     
     def _load_configurations(self):
         """Load configurations from files"""
@@ -282,6 +297,33 @@ class Settings:
                 self.logo_detection = LogoDetectionSettings(**logo_data)
         except Exception as e:
             print(f"Error loading logo detection config: {e}")
+    
+    def _load_app_config(self, config_path: Path):
+        """Load application configuration (API credentials, etc.)"""
+        try:
+            with open(config_path, 'r') as f:
+                config_data = yaml.safe_load(f)
+            
+            # Load Google Cloud credentials if specified
+            # Check both top-level and nested under api_credentials
+            creds_path = None
+            if 'google_application_credentials' in config_data:
+                creds_path = config_data['google_application_credentials']
+            elif 'api_credentials' in config_data and config_data['api_credentials']:
+                creds_path = config_data['api_credentials'].get('google_application_credentials')
+            
+            if creds_path:
+                # Expand user path (~) if present and handle null/empty strings
+                if isinstance(creds_path, str) and creds_path.strip():
+                    creds_path = os.path.expanduser(creds_path.strip())
+                    if os.path.exists(creds_path):
+                        self.google_application_credentials = creds_path
+                        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = creds_path
+                        print(f"✅ Loaded Google credentials from config: {creds_path}")
+                    else:
+                        print(f"⚠️  Google credentials path in config not found: {creds_path}")
+        except Exception as e:
+            print(f"Error loading app config: {e}")
     
     def _create_palette_from_config(self, config_data: Dict[str, Any]) -> BrandColorPalette:
         """Create BrandColorPalette from configuration data"""
