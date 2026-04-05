@@ -30,7 +30,7 @@ from .prompt_registry import registry as _prompt_registry
 logger = logging.getLogger(__name__)
 
 # Default model — override via OPENROUTER_MODEL env var
-_DEFAULT_MODEL = "openai/gpt-4o"
+_DEFAULT_MODEL = "openai/gpt-5.1"
 
 # Load prompts from the central registry at import time.
 # To switch versions: set PROMPT_VERSION_BRAND_COMPLIANCE_JUDGE=v2
@@ -64,6 +64,7 @@ class BrandComplianceJudge:
         brand_context: str,
         dominant_colors: List[Dict[str, Any]],
         logo_detections: List[Dict[str, Any]],
+        brand_rules: Optional[Dict[str, Any]] = None,
         few_shot_examples: Optional[List[Dict[str, Any]]] = None,
         verdict_mode: str = 'threshold',
     ) -> Optional[Dict[str, Any]]:
@@ -74,6 +75,10 @@ class BrandComplianceJudge:
             image_path: Absolute path to the image file.
             brand_context: RAG-retrieved brand guideline text (may be empty string
                            if no brand profile is available).
+            brand_rules: Structured brand rules from brand_store (fonts, colors,
+                         logo position, etc.). Injected as {brand_rules} in the
+                         prompt so the LLM has authoritative, specific rules to
+                         score against rather than inferring from examples.
             dominant_colors: k-means output list, e.g.
                              [{"hex": "#340081", "percentage": 42.3}, ...]
             logo_detections: YOLO raw detections, e.g.
@@ -102,6 +107,7 @@ class BrandComplianceJudge:
             image_b64=image_b64,
             media_type=media_type,
             brand_context=brand_context or "(No brand guidelines available — score based on general brand design standards)",
+            brand_rules=brand_rules or {},
             dominant_colors=dominant_colors,
             logo_detections=logo_detections,
             few_shot_examples=few_shot_examples or [],
@@ -159,11 +165,57 @@ class BrandComplianceJudge:
             "gif": "image/gif",
         }.get(ext, "image/jpeg")
 
+    @staticmethod
+    def _format_brand_rules(brand_rules: Dict[str, Any]) -> str:
+        """
+        Format the structured brand_rules dict (from brand_store) into a
+        human-readable bullet list for the LLM prompt.
+
+        Each rule is only emitted when the stored value is non-empty/non-None,
+        so missing fields don't produce misleading bullets.
+        """
+        lines: List[str] = []
+
+        typo = brand_rules.get("typography_rules", {})
+        if typo.get("bangla_font"):
+            lines.append(f"- Approved Bangla font: {typo['bangla_font']} only")
+        if typo.get("english_font"):
+            lines.append(f"- Approved English font: {typo['english_font']} only")
+        if typo.get("approved_fonts"):
+            lines.append(f"- Other approved fonts: {', '.join(typo['approved_fonts'])}")
+
+        color = brand_rules.get("color_rules", {})
+        if color.get("palette"):
+            lines.append(f"- Brand color palette: {', '.join(color['palette'])}")
+        if color.get("gradient"):
+            lines.append(f"- Required gradient: {color['gradient']}")
+        if color.get("forbidden"):
+            lines.append(f"- Forbidden colors: {', '.join(color['forbidden'])}")
+
+        logo = brand_rules.get("logo_rules", {})
+        if logo.get("position"):
+            lines.append(f"- Logo position: {logo['position']} corner always")
+        if logo.get("min_height_px"):
+            lines.append(f"- Logo minimum height: {logo['min_height_px']}px")
+        if logo.get("dark_bg_use_white"):
+            lines.append("- Logo version rule: use white logo on dark/colored backgrounds")
+        if logo.get("colorful_on_white_only"):
+            lines.append("- Logo version rule: use colorful logo on white background only")
+
+        voice = brand_rules.get("brand_voice_rules", {})
+        if voice.get("tone"):
+            lines.append(f"- Brand tone: {voice['tone']}")
+        if voice.get("language"):
+            lines.append(f"- Primary language: {voice['language']}")
+
+        return "\n".join(lines) if lines else "(No structured rules stored — rely on guidelines below)"
+
     def _build_messages(
         self,
         image_b64: str,
         media_type: str,
         brand_context: str,
+        brand_rules: Dict[str, Any],
         dominant_colors: List[Dict],
         logo_detections: List[Dict],
         few_shot_examples: List[Dict],
@@ -213,6 +265,7 @@ class BrandComplianceJudge:
 
         # Main analysis turn
         base_prompt = _USER_PROMPT_TEMPLATE.format(
+            brand_rules=self._format_brand_rules(brand_rules),
             brand_context=brand_context,
             logo_detections_json=json.dumps(logo_detections, indent=2) if logo_detections else "[]",
             dominant_colors_json=json.dumps(dominant_colors, indent=2) if dominant_colors else "[]",

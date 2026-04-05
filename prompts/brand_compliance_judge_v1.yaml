@@ -19,7 +19,10 @@ system: |
   Return JSON ONLY — no markdown, no explanation.
 
 user_template: |
-  ## Brand Guidelines
+  ## Brand Rules (authoritative — score strictly against these)
+  {brand_rules}
+
+  ## Brand Guidelines (training examples)
   {brand_context}
 
   ## YOLO Logo Detections (verify each; add any logos YOLO missed)
@@ -40,6 +43,13 @@ user_template: |
      - logo: placement, size, visibility, and brand identity compliance
      - typography: whether fonts match brand-approved fonts
      - copywriting: tone, voice, grammar, and messaging compliance
+  7. Detect any grammar, spelling, or punctuation errors in the extracted text.
+     For each error: quote the incorrect text, state the error type, and provide the corrected version.
+     If no errors are found, return an empty errors list with a positive summary.
+  8. Assess the brand tone/voice:
+     - Identify the detected tone (e.g. professional, casual, warm, motivational, formal, urgent, etc.)
+     - State whether it matches the brand's voice rules (from Brand Rules above)
+     - Give a one-sentence assessment comparing detected tone to brand guidelines
 
   Return a JSON object with EXACTLY this structure:
   {{
@@ -67,7 +77,19 @@ user_template: |
     "color":       {{"score": <0.0-1.0>, "reason": "<one sentence>"}},
     "logo":        {{"score": <0.0-1.0>, "reason": "<one sentence>"}},
     "typography":  {{"score": <0.0-1.0>, "reason": "<one sentence>"}},
-    "copywriting": {{"score": <0.0-1.0>, "reason": "<one sentence>"}}
+    "copywriting": {{"score": <0.0-1.0>, "reason": "<one sentence>"}},
+    "grammar_analysis": {{
+      "errors": [
+        {{"text": "<incorrect text>", "error_type": "<spelling|grammar|punctuation>", "suggestion": "<corrected text>"}}
+      ],
+      "error_count": <int>,
+      "summary": "<one sentence overall grammar assessment>"
+    }},
+    "tone_analysis": {{
+      "detected_tone": "<professional|casual|formal|warm|motivational|urgent|other>",
+      "on_brand": <true|false>,
+      "assessment": "<one sentence comparing detected tone to brand voice rules>"
+    }}
   }}
 
 # Appended to user_template only when verdict_mode == 'llm'

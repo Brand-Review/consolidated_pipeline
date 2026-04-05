@@ -145,6 +145,7 @@ class BasePipelineOrchestrator:
                 pass_threshold,
                 judge_verdict=judge_verdict,
                 verdict_mode=verdict_mode_final,
+                compliance_breakdown=results.get('compliance_breakdown'),
             )
 
             # Include verdict_reason when in llm mode and LLM provided one
@@ -262,9 +263,13 @@ class BasePipelineOrchestrator:
                 brand_context = "\n\n".join(brand_context_parts)
                 verdict_mode = (analysis_options or {}).get('verdict_mode', 'threshold')
 
+                # Extract structured brand rules from the stored profile
+                brand_rules = brand_profile.get("rules", {}) if brand_profile else {}
+
                 judge_verdict = self.brand_judge.run(
                     image_path=image_path,
                     brand_context=brand_context,
+                    brand_rules=brand_rules,
                     dominant_colors=dominant_colors,
                     logo_detections=yolo_detections,
                     few_shot_examples=few_shot_examples,
@@ -317,11 +322,23 @@ class BasePipelineOrchestrator:
                     }
 
                     # Copywriting analysis from LLM (replaces HybridToneAnalyzer)
+                    extracted = judge_verdict.get("extracted_text", "")
+                    words = extracted.split() if extracted else []
+                    sentences = [s for s in extracted.replace('\n', '. ').split('.') if s.strip()] if extracted else []
                     model_results['copywriting_analysis'] = {
-                        "extracted_text": judge_verdict.get("extracted_text", ""),
+                        "extracted_text": extracted,
                         "copywriting_score": judge_verdict.get("copywriting", {}).get("score", 0.0),
                         "reason": judge_verdict.get("copywriting", {}).get("reason", ""),
                         "source": "llm_judge",
+                        "text_metrics": {
+                            "word_count": len(words),
+                            "sentence_count": len(sentences),
+                            "readability_level": "N/A",
+                        },
+                        "grammar_analysis": judge_verdict.get("grammar_analysis", {
+                            "errors": [], "error_count": 0, "summary": "No grammar analysis available"
+                        }),
+                        "tone_analysis": judge_verdict.get("tone_analysis", {}),
                     }
 
                     return {
@@ -571,18 +588,23 @@ class BasePipelineOrchestrator:
             logger.error(f"Compliance calculation failed: {e}")
             return 0.0
 
+    # Any single dimension below this score forces rejection regardless of overall average.
+    _CRITICAL_DIMENSION_THRESHOLD = 0.65
+
     def _generate_verdict(
         self,
         score: float,
         threshold: float,
         judge_verdict: Optional[Dict] = None,
         verdict_mode: str = 'threshold',
+        compliance_breakdown: Optional[Dict] = None,
     ) -> str:
         """
         Return 'approved' or 'rejected'.
 
         In 'llm' mode: LLM explicit verdict always wins when present.
-        In 'threshold' mode (default): pure math — score >= threshold.
+        In 'threshold' mode (default): overall score >= threshold, PLUS no single
+        dimension may fall below _CRITICAL_DIMENSION_THRESHOLD (hard floor).
         """
         if (
             verdict_mode == 'llm'
@@ -590,6 +612,20 @@ class BasePipelineOrchestrator:
             and judge_verdict.get('verdict') in ('approved', 'rejected')
         ):
             return judge_verdict['verdict']
+
+        # Hard-floor: any critical dimension failure overrides the overall average
+        if compliance_breakdown:
+            critical_fails = [
+                dim for dim, data in compliance_breakdown.items()
+                if isinstance(data, dict) and data.get('score', 1.0) < self._CRITICAL_DIMENSION_THRESHOLD
+            ]
+            if critical_fails:
+                logger.info(
+                    "[_generate_verdict] Hard-floor rejection — critical failures: %s",
+                    ", ".join(critical_fails),
+                )
+                return 'rejected'
+
         return 'approved' if score >= threshold else 'rejected'
     
     def _generate_summary_and_recommendations(self, results: Dict[str, Any]) -> Dict[str, Any]:
