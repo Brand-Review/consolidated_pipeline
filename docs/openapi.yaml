@@ -1,0 +1,758 @@
+openapi: 3.1.0
+info:
+  title: BrandGuard Consolidated Pipeline API
+  version: 1.0.0
+  description: |
+    **Production server:** Flask (`python run.py` / `app.py`) — asynchronous full analysis with optional `callback_url` for webhooks to br-be.
+
+    **Alternative:** `app_fastapi.py` exposes the same analysis URLs with **synchronous** full `POST /api/analyze` (no background job). Use `/docs` on the FastAPI process for auto-generated schemas.
+
+    **Authentication:** Internal callback from this service to br-be uses header `X-Internal-Secret` (must match `INTERNAL_WEBHOOK_SECRET`). Pipeline HTTP API itself is unauthenticated by default — protect at the network edge in production.
+
+    **Multipart:** Analyzer tuning fields use form keys aligned with br-be (snake_case), e.g. `enable_color`, `color_n_colors`, `callback_url`, `brand_id`.
+  contact:
+    name: BrandReview / BrandGuard
+    url: https://app.brandreview.ai
+
+servers:
+  - url: http://127.0.0.1:5001
+    description: Local (typical run.py / Docker mapped port)
+  - url: http://127.0.0.1:5003
+    description: Local app.py __main__ default port
+  - url: "{baseUrl}"
+    description: Override via environment / gateway
+    variables:
+      baseUrl:
+        default: http://127.0.0.1:5001
+
+tags:
+  - name: Health
+    description: Liveness and pipeline readiness
+  - name: Analysis
+    description: Full and single-model brand analysis
+  - name: Brand profiles
+    description: Onboarding and CRUD for RAG-backed brand profiles
+  - name: Config
+    description: Runtime configuration introspection (YAML-backed settings)
+  - name: Files
+    description: Uploaded assets and generated results
+
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/analyze:
+    post:
+      tags: [Analysis]
+      summary: Full analysis (async, Flask)
+      description: |
+        Returns **202** immediately with `job_id` and `status: processing`. Analysis runs in a background thread.
+
+        When `callback_url` is set (required for br-be integration), results are POSTed as JSON with header `X-Internal-Secret`.
+
+        Optional header `X-Request-ID` sets `job_id`; otherwise a UUID is generated.
+
+        Form field `input_type`: `file` (default), `text`, or `url`.
+      operationId: analyzeFullAsync
+      parameters:
+        - name: X-Request-ID
+          in: header
+          required: false
+          schema:
+            type: string
+          description: Correlates with job_id in the response
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/FullAnalyzeForm"
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobAccepted"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "503":
+          description: Pipeline not initialized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/analyze/color:
+    post:
+      tags: [Analysis]
+      summary: Color analysis only
+      operationId: analyzeColor
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                n_colors:
+                  type: integer
+                  default: 8
+                n_clusters:
+                  type: integer
+                  default: 8
+                color_tolerance:
+                  type: number
+                  default: 2.3
+                enable_contrast_check:
+                  type: string
+                  enum: ["true", "false"]
+                  default: "true"
+                primary_colors:
+                  type: string
+                secondary_colors:
+                  type: string
+                accent_colors:
+                  type: string
+                primary_threshold:
+                  type: integer
+                secondary_threshold:
+                  type: integer
+                accent_threshold:
+                  type: integer
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ColorAnalysisResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/analyze/typography:
+    post:
+      tags: [Analysis]
+      summary: Typography analysis only
+      operationId: analyzeTypography
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                merge_regions:
+                  type: string
+                  enum: ["true", "false"]
+                  default: "true"
+                distance_threshold:
+                  type: integer
+                  default: 20
+                confidence_threshold:
+                  type: number
+                  default: 0.7
+                enable_font_validation:
+                  type: string
+                  enum: ["true", "false"]
+                  default: "true"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TypographyAnalysisResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/analyze/copywriting:
+    post:
+      tags: [Analysis]
+      summary: Copywriting / tone analysis only
+      operationId: analyzeCopywriting
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                input_type:
+                  type: string
+                  enum: [file, text]
+                  default: file
+                file:
+                  type: string
+                  format: binary
+                text_content:
+                  type: string
+                include_suggestions:
+                  type: string
+                  enum: ["true", "false"]
+                  default: "true"
+                include_industry_benchmarks:
+                  type: string
+                  enum: ["true", "false"]
+                  default: "true"
+                enable_brand_profile_matching:
+                  type: string
+                  enum: ["true", "false"]
+                  default: "true"
+                formality_score:
+                  type: integer
+                confidence_level:
+                  type: string
+                warmth_score:
+                  type: integer
+                energy_score:
+                  type: integer
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CopywritingAnalysisResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/analyze/logo:
+    post:
+      tags: [Analysis]
+      summary: Logo detection only
+      operationId: analyzeLogo
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                enable_placement_validation:
+                  type: string
+                  enum: ["true", "false"]
+                  default: "true"
+                enable_brand_compliance:
+                  type: string
+                  enum: ["true", "false"]
+                  default: "true"
+                generate_annotations:
+                  type: string
+                  enum: ["true", "false"]
+                  default: "true"
+                logo_confidence_threshold:
+                  type: number
+                  default: 0.5
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoAnalysisResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/brand/onboard:
+    post:
+      tags: [Brand profiles]
+      summary: Onboard brand from guideline PDF + optional images
+      description: |
+        Creates a brand profile, extracts structured rules from PDF, indexes text in Qdrant, and indexes approved/rejected images.
+      operationId: brandOnboard
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [brand_name, guideline_pdf]
+              properties:
+                brand_name:
+                  type: string
+                guideline_pdf:
+                  type: string
+                  format: binary
+                approved_images:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                rejected_images:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                rejection_reasons:
+                  type: string
+                  description: JSON array of reason lists aligned with rejected_images
+      responses:
+        "200":
+          description: Brand created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandOnboardResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /api/brand:
+    get:
+      tags: [Brand profiles]
+      summary: List brand profiles
+      operationId: listBrands
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  count:
+                    type: integer
+                  brands:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /api/brand/{brand_id}:
+    get:
+      tags: [Brand profiles]
+      summary: Get brand by ID
+      operationId: getBrand
+      parameters:
+        - $ref: "#/components/parameters/BrandId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  brand:
+                    type: object
+                    additionalProperties: true
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    delete:
+      tags: [Brand profiles]
+      summary: Delete brand and vector collections
+      operationId: deleteBrand
+      parameters:
+        - $ref: "#/components/parameters/BrandId"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  brand_id:
+                    type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /api/status/{analysis_id}:
+    get:
+      tags: [Analysis]
+      summary: Pipeline analysis status (by analysis id)
+      operationId: getAnalysisStatus
+      parameters:
+        - name: analysis_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  status:
+                    type: object
+                    additionalProperties: true
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/config:
+    get:
+      tags: [Config]
+      summary: Get non-secret configuration summary
+      operationId: getConfig
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigSummaryResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [Config]
+      summary: Update configuration (placeholder)
+      description: Handler accepts JSON but persistent updates are not fully implemented in code.
+      operationId: updateConfig
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Acknowledged
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /uploads/{filename}:
+    get:
+      tags: [Files]
+      summary: Download uploaded file by name
+      operationId: getUpload
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /results/{filename}:
+    get:
+      tags: [Files]
+      summary: Download generated result asset
+      operationId: getResultFile
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+components:
+  parameters:
+    BrandId:
+      name: brand_id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    ServerError:
+      description: Server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    ServiceUnavailable:
+      description: Pipeline or settings unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+
+  schemas:
+    ErrorBody:
+      type: object
+      properties:
+        error:
+          type: string
+      additionalProperties: true
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: healthy
+        timestamp:
+          type: string
+          format: date-time
+        pipeline_ready:
+          type: boolean
+        settings_loaded:
+          type: boolean
+        version:
+          type: string
+        debug_info:
+          type: object
+          additionalProperties: true
+
+    JobAccepted:
+      type: object
+      required: [job_id, status]
+      properties:
+        job_id:
+          type: string
+        status:
+          type: string
+          example: processing
+
+    PipelineCallbackPayload:
+      type: object
+      description: POST body sent to br-be when analysis finishes
+      properties:
+        job_id:
+          type: string
+        status:
+          type: string
+          enum: [completed, failed, processing]
+        results:
+          type: object
+          additionalProperties: true
+        error:
+          type: string
+
+    FullAnalyzeForm:
+      type: object
+      properties:
+        input_type:
+          type: string
+          enum: [file, text, url]
+          default: file
+        file:
+          type: string
+          format: binary
+        text_content:
+          type: string
+        url:
+          type: string
+          format: uri
+        callback_url:
+          type: string
+          format: uri
+          description: br-be internal callback URL including analysis id
+        brand_id:
+          type: string
+          description: Optional brand profile for RAG-enhanced analysis
+        enable_color:
+          type: string
+          enum: ["true", "false"]
+        color_n_colors:
+          type: integer
+        color_tolerance:
+          type: number
+        enable_contrast_check:
+          type: string
+          enum: ["true", "false"]
+        brand_palette:
+          type: string
+        primary_colors:
+          type: string
+        secondary_colors:
+          type: string
+        accent_colors:
+          type: string
+        enable_typography:
+          type: string
+          enum: ["true", "false"]
+        merge_regions:
+          type: string
+          enum: ["true", "false"]
+        distance_threshold:
+          type: integer
+        typography_confidence_threshold:
+          type: number
+        expected_fonts:
+          type: string
+        enable_copywriting:
+          type: string
+          enum: ["true", "false"]
+        formality_score:
+          type: integer
+        confidence_level:
+          type: string
+        warmth_score:
+          type: integer
+        energy_score:
+          type: integer
+        enable_logo:
+          type: string
+          enum: ["true", "false"]
+        enable_placement_validation:
+          type: string
+          enum: ["true", "false"]
+        generate_annotations:
+          type: string
+          enum: ["true", "false"]
+        logo_confidence_threshold:
+          type: number
+        max_logo_detections:
+          type: integer
+        pass_threshold:
+          type: number
+        warning_threshold:
+          type: number
+        critical_threshold:
+          type: number
+        include_recommendations:
+          type: string
+          enum: ["true", "false"]
+        analysis_priority:
+          type: string
+        report_detail:
+          type: string
+        scoring_weights:
+          type: string
+          description: JSON string of model weights
+
+    ColorAnalysisResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        color_analysis:
+          type: object
+          additionalProperties: true
+
+    TypographyAnalysisResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        typography_analysis:
+          type: object
+          additionalProperties: true
+
+    CopywritingAnalysisResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        copywriting_analysis:
+          type: object
+          additionalProperties: true
+
+    LogoAnalysisResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        logo_analysis:
+          type: object
+          additionalProperties: true
+
+    BrandOnboardResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        brand_id:
+          type: string
+        brand_name:
+          type: string
+        extracted_rules:
+          type: object
+          additionalProperties: true
+        chunks_indexed:
+          type: integer
+        assets_indexed:
+          type: integer
+
+    ConfigSummaryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        config:
+          type: object
+          additionalProperties: true

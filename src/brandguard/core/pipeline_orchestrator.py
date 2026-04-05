@@ -202,11 +202,13 @@ try:
         from brandguard.core.detector import LogoDetector
         from brandguard.core.validator import LogoPlacementValidator
         from brandguard.core.pdf_processor import PDFImageExtractor, PDFLogoDetector
+        from brandguard.core.agentic_detector import AgenticLogoDetector
         imported_models['LogoDetector'] = LogoDetector
         imported_models['LogoPlacementValidator'] = LogoPlacementValidator
         imported_models['PDFImageExtractor'] = PDFImageExtractor
         imported_models['PDFLogoDetector'] = PDFLogoDetector
-        print("✅ LogoDetector and related classes imported successfully from LogoDetector folder")
+        imported_models['AgenticLogoDetector'] = AgenticLogoDetector
+        print("✅ LogoDetector and AgenticLogoDetector imported successfully from LogoDetector folder")
     except Exception as e:
         print(f"❌ LogoDetector import failed: {e}")
         # Try alternative import method
@@ -398,6 +400,18 @@ class PipelineOrchestrator:
                 logger.info("✅ LogoValidator class available for real model usage")
             else:
                 logger.warning("⚠️ LogoValidator not available, using fallback")
+
+            # Initialize AgenticLogoDetector (preferred path)
+            AgenticLogoDetector = imported_models.get('AgenticLogoDetector')
+            if AgenticLogoDetector is not None:
+                try:
+                    self.agentic_logo_detector = AgenticLogoDetector(config=None)
+                    logger.info("✅ AgenticLogoDetector initialised in orchestrator")
+                except Exception as e:
+                    logger.warning(f"⚠️ AgenticLogoDetector init failed: {e}")
+                    self.agentic_logo_detector = None
+            else:
+                self.agentic_logo_detector = None
             
             logger.info("Real models initialization completed successfully")
             
@@ -865,10 +879,17 @@ class PipelineOrchestrator:
             if MODELS_LOADED and hasattr(self, 'logo_detector') and hasattr(self, 'logo_validator'):
                 # Use real models
                 try:
-                    # YOLOv8 Detection
                     start_time = datetime.now()
-                    
-                    logo_detections = self.logo_detector.detect_logos(image)
+                    image_id = getattr(self, 'current_analysis_id', None)
+
+                    # Prefer AgenticLogoDetector (YOLO → LLM Judge → LLM Detector pipeline)
+                    agentic_result = None
+                    if hasattr(self, 'agentic_logo_detector') and self.agentic_logo_detector is not None:
+                        agentic_result = self.agentic_logo_detector.detect(image, image_id=image_id)
+                        logo_detections = agentic_result.get('detections', [])
+                    else:
+                        logo_detections = self.logo_detector.detect_logos(image)
+                        agentic_result = None
 
                     
                     
@@ -901,11 +922,10 @@ class PipelineOrchestrator:
                     
                     compliance_score = placement_validation.get('compliance_score', 0.8)
                     
-                    return {
+                    result = {
                         'logo_detections': logo_detections,
                         'placement_validation': placement_validation,
                         'brand_compliance': brand_compliance,
-                       
                         'scores': {
                             'overall': compliance_score,
                             'strict': placement_validation.get('strict_score', 0.0)
@@ -930,6 +950,15 @@ class PipelineOrchestrator:
                         },
                         'compliance_score': compliance_score
                     }
+                    # Merge agentic metadata if available
+                    if agentic_result is not None:
+                        result['pipeline_path'] = agentic_result.get('pipeline_path')
+                        result['detection_source'] = agentic_result.get('detection_source')
+                        result['openrouter_available'] = agentic_result.get('openrouter_available', True)
+                        result['judge_verdicts'] = agentic_result.get('judge_verdicts')
+                        result['prompt_versions'] = agentic_result.get('prompt_versions', {})
+                        result['analysis_type'] = 'agentic_logo_analysis'
+                    return result
                     
                 except Exception as e:
                     logger.error(f"Real logo analysis failed: {e}, falling back to placeholder")

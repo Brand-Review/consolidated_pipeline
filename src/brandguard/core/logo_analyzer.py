@@ -6,6 +6,8 @@ Description: Logo Detection Analysis Module
 Handles logo detection and validation
 """
 
+import uuid
+
 import cv2
 import numpy as np
 from typing import List, Dict, Any, Tuple, Optional
@@ -22,13 +24,24 @@ class LogoAnalyzer:
         self.imported_models = imported_models
         self.logo_detector = None
         self.logo_validator = None
-        
+        self._agentic_detector = None
+
         # Initialize logo detection components
         self._init_logo_models()
     
     def _init_logo_models(self):
         """Initialize logo detection models"""
         try:
+            # Prefer AgenticLogoDetector if available
+            AgenticLogoDetector = self.imported_models.get('AgenticLogoDetector')
+            if AgenticLogoDetector is not None:
+                try:
+                    self._agentic_detector = AgenticLogoDetector(config=None)
+                    logger.info("✅ AgenticLogoDetector initialised")
+                except Exception as e:
+                    logger.warning(f"⚠️ AgenticLogoDetector init failed: {e} — will use legacy LogoDetector")
+                    self._agentic_detector = None
+
             LogoDetector = self.imported_models.get('LogoDetector')
             LogoValidator = self.imported_models.get('LogoPlacementValidator')
             
@@ -95,12 +108,23 @@ class LogoAnalyzer:
             self.logo_detector = None
             self.logo_validator = None
     
-    def analyze_logos(self, image: np.ndarray, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def analyze_logos(
+        self,
+        image: np.ndarray,
+        options: Optional[Dict[str, Any]] = None,
+        image_id: Optional[str] = None,
+        rag_context: str = "",
+        few_shot_examples: Optional[List[Dict]] = None,
+    ) -> Dict[str, Any]:
         """Perform logo detection analysis on an image"""
         try:
             if not options:
                 options = {}
-            
+
+            # Ensure a stable image_id for logging / tracing
+            if image_id is None:
+                image_id = f"logo_{uuid.uuid4().hex[:12]}"
+
             # Check if logo analysis is enabled
             if not options.get('enabled', True):
                 return {
@@ -109,13 +133,25 @@ class LogoAnalyzer:
                     'brand_compliance': {},
                     'analysis_type': 'disabled'
                 }
-            
-            # Use real models if available
+
+            # Thread RAG context and few-shot examples into options for downstream use
+            if rag_context:
+                options = dict(options)
+                options['brand_guideline_context'] = rag_context
+            if few_shot_examples:
+                options = dict(options) if 'brand_guideline_context' not in options else options
+                options['few_shot_examples'] = few_shot_examples
+
+            # Use AgenticLogoDetector if available (preferred path)
+            if self._agentic_detector is not None:
+                return self._analyze_with_agentic(image, options, image_id)
+
+            # Legacy: real models without agentic pipeline
             if self.logo_detector and self.logo_validator:
                 return self._analyze_with_real_models(image, options)
-            else:
-                return self._analyze_with_fallback(image, options)
-                
+
+            return self._analyze_with_fallback(image, options)
+
         except Exception as e:
             logger.error(f"Logo analysis failed: {e}")
             return {
@@ -126,6 +162,53 @@ class LogoAnalyzer:
                 'analysis_type': 'error'
             }
     
+    def _analyze_with_agentic(self, image: np.ndarray, options: Dict[str, Any], image_id: str) -> Dict[str, Any]:
+        """Analyze logos using the AgenticLogoDetector (YOLO → LLM Judge → LLM Detector)."""
+        try:
+            start_time = datetime.now()
+            agentic_result = self._agentic_detector.detect(image, image_id=image_id)
+            logo_detections = agentic_result.get("detections", [])
+
+            # Validate placement if enabled
+            placement_validation = {}
+            if options.get('enable_placement_validation', True) and self.logo_validator:
+                placement_validation = self._validate_logo_placement_real(logo_detections, image.shape, options)
+
+            # Brand compliance if enabled
+            brand_compliance = {}
+            if options.get('enable_brand_compliance', True):
+                brand_compliance = self._check_logo_brand_compliance_real(logo_detections)
+
+            compliance_score = self._calculate_logo_compliance_score(
+                logo_detections, placement_validation, brand_compliance
+            )
+            processing_time = (datetime.now() - start_time).total_seconds() * 1000
+
+            return {
+                'logo_detections': logo_detections,
+                'placement_validation': placement_validation,
+                'brand_compliance': brand_compliance,
+                'scores': {
+                    'overall': compliance_score,
+                    'placement': placement_validation.get('compliance_score', 0),
+                    'brand': brand_compliance.get('compliance_score', 0),
+                },
+                'processing_time_ms': processing_time,
+                'analysis_type': 'agentic_logo_analysis',
+                # Agentic metadata (passed through to API response)
+                'pipeline_path': agentic_result.get('pipeline_path'),
+                'detection_source': agentic_result.get('detection_source'),
+                'openrouter_available': agentic_result.get('openrouter_available', True),
+                'judge_verdicts': agentic_result.get('judge_verdicts'),
+                'prompt_versions': agentic_result.get('prompt_versions', {}),
+            }
+
+        except Exception as e:
+            logger.error(f"Agentic logo analysis failed: {e}, falling back to legacy real models")
+            if self.logo_detector and self.logo_validator:
+                return self._analyze_with_real_models(image, options)
+            return self._analyze_with_fallback(image, options)
+
     def _analyze_with_real_models(self, image: np.ndarray, options: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze logos using real models"""
         try:

@@ -75,7 +75,13 @@ class CopywritingAnalyzer:
             'allow_slang': False
         }
     
-    def analyze_copywriting(self, image: np.ndarray, text_content: Optional[str] = None) -> Dict[str, Any]:
+    def analyze_copywriting(
+        self,
+        image: np.ndarray,
+        text_content: Optional[str] = None,
+        rag_context: str = "",
+        few_shot_examples: Optional[List[Dict]] = None,
+    ) -> Dict[str, Any]:
         """
         Perform comprehensive copywriting analysis
         
@@ -103,13 +109,27 @@ class CopywritingAnalyzer:
                 try:
                         # Analyze image directly
                         user_settings = self._get_default_user_settings()
+                        # Inject RAG-retrieved brand guidelines into VLM context
+                        if rag_context:
+                            user_settings['brand_guideline_context'] = rag_context
+                        # Inject few-shot reference examples (approved/rejected assets)
+                        if few_shot_examples:
+                            user_settings['few_shot_examples'] = few_shot_examples
                         # Save image temporarily for VLLM analysis
                         import tempfile
-                        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
-                            import cv2
-                            cv2.imwrite(tmp_file.name, image)
-                            vllm_analysis = self.vllm_analyzer.analyze_image(tmp_file.name, user_settings)
-                            print(vllm_analysis)
+                        import os as _os
+                        tmp_path = None
+                        try:
+                            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                                tmp_path = tmp_file.name
+                            # File handle is closed before cv2 writes, avoiding platform locking issues
+                            if not cv2.imwrite(tmp_path, image):
+                                raise RuntimeError(f"cv2.imwrite failed writing to {tmp_path}")
+                            vllm_analysis = self.vllm_analyzer.analyze_image(tmp_path, user_settings)
+                            logger.debug(f"VLLM analysis result: {vllm_analysis}")
+                        finally:
+                            if tmp_path and _os.path.exists(tmp_path):
+                                _os.unlink(tmp_path)
                         
                         if vllm_analysis:
                             # Map VLLM/Hybrid response structure to expected format

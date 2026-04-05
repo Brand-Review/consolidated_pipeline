@@ -126,27 +126,28 @@ def import_all_models():
             print(f"❌ FontComplianceChecker import failed: {e}")
             FontComplianceChecker = None
         
-        # Import TextExtractor (PaddleOCR integration)
-        try:
-            import importlib.util
-            text_extractor_path = os.path.join(typography_path, 'brandguard', 'core', 'text_extractor.py')
-            if os.path.exists(text_extractor_path):
-                spec = importlib.util.spec_from_file_location("text_extractor", text_extractor_path)
-                text_extractor_module = importlib.util.module_from_spec(spec)
-                
-                # Set up the module's __package__ attribute to avoid relative import issues
-                text_extractor_module.__package__ = 'brandguard.core'
-                
-                spec.loader.exec_module(text_extractor_module)
-                TextExtractor = text_extractor_module.TextExtractor
-                imported_models['TextExtractor'] = TextExtractor
-                print("✅ TextExtractor imported successfully using importlib")
-            else:
-                print(f"❌ TextExtractor file not found at: {text_extractor_path}")
+        # Import TextExtractor (PaddleOCR integration) - skip if disabled via env
+        use_paddle_ocr = os.environ.get('USE_PADDLE_OCR', '1').lower() in ('1', 'true', 'yes')
+        TextExtractor = None
+        if use_paddle_ocr:
+            try:
+                import importlib.util
+                text_extractor_path = os.path.join(typography_path, 'brandguard', 'core', 'text_extractor.py')
+                if os.path.exists(text_extractor_path):
+                    spec = importlib.util.spec_from_file_location("text_extractor", text_extractor_path)
+                    text_extractor_module = importlib.util.module_from_spec(spec)
+                    text_extractor_module.__package__ = 'brandguard.core'
+                    spec.loader.exec_module(text_extractor_module)
+                    TextExtractor = text_extractor_module.TextExtractor
+                    imported_models['TextExtractor'] = TextExtractor
+                    print("✅ TextExtractor imported successfully using importlib")
+                else:
+                    print(f"❌ TextExtractor file not found at: {text_extractor_path}")
+            except Exception as e:
+                print(f"❌ TextExtractor import failed: {e}")
                 TextExtractor = None
-        except Exception as e:
-            print(f"❌ TextExtractor import failed: {e}")
-            TextExtractor = None
+        else:
+            print("⏭️  PaddleOCR/TextExtractor skipped (USE_PADDLE_OCR=0)")
         
         # Import VLLMToneAnalyzer (new VLLM-based approach)
         try:
@@ -184,6 +185,24 @@ def import_all_models():
             print(f"❌ HybridToneAnalyzer import failed: {e}")
             HybridToneAnalyzer = None
         
+        # Import AgenticLogoDetector (new agentic pipeline).
+        # Use package import — logo_path is on sys.path so brandguard.* resolves; file-only
+        # importlib breaks relative imports inside agentic_detector.py.
+        try:
+            import importlib
+            agentic_pkg = os.path.join(logo_path, "brandguard", "core", "agentic_detector.py")
+            if os.path.exists(agentic_pkg):
+                agentic_detector_module = importlib.import_module("brandguard.core.agentic_detector")
+                AgenticLogoDetector = agentic_detector_module.AgenticLogoDetector
+                imported_models["AgenticLogoDetector"] = AgenticLogoDetector
+                print("✅ AgenticLogoDetector imported successfully")
+            else:
+                print(f"❌ AgenticLogoDetector file not found at: {agentic_pkg}")
+                imported_models["AgenticLogoDetector"] = None
+        except Exception as e:
+            print(f"❌ AgenticLogoDetector import failed: {e}")
+            imported_models["AgenticLogoDetector"] = None
+
         # Import Logo Detection components using importlib
         try:
             import importlib.util

@@ -47,10 +47,28 @@ if settings:
         logger.error("Failed to initialize pipeline: %s", e)
 
 # ---------------------- FastAPI app ---------------------
+_OPENAPI_TAGS = [
+    {"name": "Health", "description": "Liveness and pipeline readiness"},
+    {"name": "Analysis", "description": "Full four-model run and single-analyzer endpoints"},
+    {"name": "Config", "description": "YAML-backed settings summary (non-secret)"},
+    {"name": "Files", "description": "Upload and result asset URLs"},
+]
+
 app = FastAPI(
     title="BrandGuard AI API (FastAPI)",
     version="1.0.0",
-    description="Unified brand-asset analysis API migrated from Flask",
+    description=(
+        "Synchronous HTTP API for color, typography, copywriting, and logo analysis. "
+        "Unlike the default Flask `app.py`, `POST /api/analyze` here runs inline and returns full results in the response. "
+        "For async jobs + `callback_url` integration with br-be, run the Flask app instead. "
+        "OpenAPI is generated automatically; use **/docs** (Swagger) or **/redoc** (ReDoc)."
+    ),
+    openapi_tags=_OPENAPI_TAGS,
+    contact={"name": "BrandReview / BrandGuard", "url": "https://app.brandreview.ai"},
+    license_info={"name": "Proprietary"},
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
 )
 
 # CORS (same as Flask-CORS)
@@ -100,7 +118,12 @@ def get_file_type(filename: str) -> str:
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-@app.get("/api/health")
+@app.get(
+    "/api/health",
+    tags=["Health"],
+    summary="Health check",
+    response_description="Pipeline and settings readiness flags",
+)
 async def health():
     return {
         "status": "healthy",
@@ -111,7 +134,22 @@ async def health():
     }
 
 # ---------------------- main analysis --------------------
-@app.post("/api/analyze")
+@app.post(
+    "/api/analyze",
+    tags=["Analysis"],
+    summary="Full analysis (synchronous)",
+    description=(
+        "Runs all enabled analyzers and returns `results` in this response. "
+        "Send `multipart/form-data`: first file part is the asset when `input_type=file`; "
+        "use `text_content` or `url` fields for other input types. Boolean options are form strings `true`/`false`."
+    ),
+    responses={
+        200: {"description": "Analysis finished successfully"},
+        400: {"description": "Missing or invalid input"},
+        500: {"description": "Analyzer returned an error"},
+        503: {"description": "Pipeline not initialized"},
+    },
+)
 async def analyze_content(
     files: List[UploadFile] = File(...),
     input_type: str = Form("file"),
@@ -281,7 +319,12 @@ def _single_analysis(
 
     return {"success": True, model_key: results["model_results"].get(model_key, {})}
 
-@app.post("/api/analyze/color")
+@app.post(
+    "/api/analyze/color",
+    tags=["Analysis"],
+    summary="Color analysis",
+    responses={200: {"description": "CIEDE2000 / palette / contrast output"}, 503: {"description": "Pipeline down"}},
+)
 async def analyze_color(
     file: UploadFile = File(...),
     n_colors: int = Form(8),
@@ -299,7 +342,12 @@ async def analyze_color(
         },
     )
 
-@app.post("/api/analyze/typography")
+@app.post(
+    "/api/analyze/typography",
+    tags=["Analysis"],
+    summary="Typography analysis",
+    responses={200: {"description": "OCR + font identification output"}, 503: {"description": "Pipeline down"}},
+)
 async def analyze_typography(
     file: UploadFile = File(...),
     distance_threshold: int = Form(20),
@@ -317,7 +365,13 @@ async def analyze_typography(
         },
     )
 
-@app.post("/api/analyze/copywriting")
+@app.post(
+    "/api/analyze/copywriting",
+    tags=["Analysis"],
+    summary="Copywriting / tone analysis",
+    description="`input_type=text` uses `text_content`; otherwise upload `file`.",
+    responses={200: {"description": "Tone and brand-voice scoring"}, 503: {"description": "Pipeline down"}},
+)
 async def analyze_copywriting(
     file: UploadFile = File(None),
     text_content: str = Form(""),
@@ -350,11 +404,18 @@ async def analyze_copywriting(
         )
     return {"success": True, "copywriting_analysis": results["model_results"]["copywriting_analysis"]}
 
-@app.post("/api/analyze/logo")
+@app.post(
+    "/api/analyze/logo",
+    tags=["Analysis"],
+    summary="Logo detection",
+    responses={200: {"description": "YOLO / VL detections and placement hints"}, 503: {"description": "Pipeline down"}},
+)
 async def analyze_logo(
     file: UploadFile = File(...),
     generate_annotations: str = Form("true"),
 ):
+    import uuid as _uuid
+    image_id = f"direct_{_uuid.uuid4().hex[:8]}"
     return _single_analysis(
         file,
         "logo_analysis",
@@ -362,11 +423,17 @@ async def analyze_logo(
             "generate_annotations": generate_annotations.lower() == "true",
             "enable_placement_validation": True,
             "enable_brand_compliance": True,
+            "image_id": image_id,
         },
     )
 
 # ---------------------- utilities -----------------------
-@app.get("/api/status/{analysis_id}")
+@app.get(
+    "/api/status/{analysis_id}",
+    tags=["Analysis"],
+    summary="Analysis job status",
+    responses={404: {"description": "Unknown analysis id"}, 503: {"description": "Pipeline down"}},
+)
 async def get_analysis_status(analysis_id: str):
     if not pipeline:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
@@ -375,7 +442,12 @@ async def get_analysis_status(analysis_id: str):
         raise HTTPException(status_code=404, detail=status["error"])
     return {"success": True, "status": status}
 
-@app.get("/api/config")
+@app.get(
+    "/api/config",
+    tags=["Config"],
+    summary="Configuration summary",
+    responses={503: {"description": "Settings not loaded"}},
+)
 async def get_config():
     if not settings:
         raise HTTPException(status_code=503, detail="Settings not loaded")

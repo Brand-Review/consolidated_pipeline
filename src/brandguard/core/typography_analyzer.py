@@ -51,7 +51,14 @@ class TypographyAnalyzer:
             logger.error(f"Typography initialization traceback: {traceback.format_exc()}")
             self.font_compliance_checker = None
     
-    def analyze_typography(self, image: np.ndarray, text_regions: Optional[List[Dict]] = None) -> Dict[str, Any]:
+    def analyze_typography(
+        self,
+        image: np.ndarray,
+        text_regions: Optional[List[Dict]] = None,
+        rag_context: str = "",
+        few_shot_examples: Optional[List[Dict]] = None,
+        brand_rules: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Perform comprehensive typography analysis using FontComplianceChecker
         
@@ -64,13 +71,22 @@ class TypographyAnalyzer:
         """
         try:
             logger.info("🔍 Starting typography analysis...")
-            
+
+            if rag_context:
+                logger.info(f"Typography RAG context ({len(rag_context)} chars) available")
+
             if self.font_compliance_checker:
                 # Use FontComplianceChecker for comprehensive analysis
-                return self._analyze_with_font_compliance_checker(image)
+                result = self._analyze_with_font_compliance_checker(image)
             else:
                 # Fallback to basic analysis
-                return self._fallback_typography_analysis(image, text_regions)
+                result = self._fallback_typography_analysis(image, text_regions)
+
+            # Overlay brand profile rules when provided (overrides YAML defaults)
+            if brand_rules:
+                result = self._apply_brand_typography_rules(result, brand_rules, rag_context)
+
+            return result
             
         except Exception as e:
             logger.error(f"Typography analysis failed: {e}")
@@ -180,6 +196,56 @@ class TypographyAnalyzer:
                 'errors': [str(e)]
             }
     
+    def _apply_brand_typography_rules(
+        self,
+        result: Dict[str, Any],
+        brand_rules: Dict[str, Any],
+        rag_context: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Re-validate detected fonts against explicit brand typography rules.
+        Overrides the YAML-based approved fonts list with the brand profile's font rules.
+        """
+        approved_fonts_lower = set()
+        for key in ("bangla_font", "english_font"):
+            val = brand_rules.get(key)
+            if val:
+                approved_fonts_lower.add(val.lower())
+        for f in brand_rules.get("approved_fonts", []):
+            approved_fonts_lower.add(f.lower())
+
+        if not approved_fonts_lower:
+            return result  # No brand rules to apply
+
+        fonts_detected = result.get("fonts_detected", [])
+        violations = []
+        for font in fonts_detected:
+            detected_name = (font.get("font_family") or "").lower()
+            is_compliant = any(approved in detected_name or detected_name in approved for approved in approved_fonts_lower)
+            font["font_approved"] = is_compliant
+            if not is_compliant and font.get("text"):
+                violations.append(
+                    f"Font '{font.get('font_family', 'unknown')}' on text '{font['text'][:30]}' "
+                    f"does not match brand fonts: {list(approved_fonts_lower)}"
+                )
+
+        compliant = [f for f in fonts_detected if f.get("font_approved")]
+        non_compliant = [f for f in fonts_detected if not f.get("font_approved")]
+        brand_score = len(compliant) / max(len(fonts_detected), 1)
+
+        result["font_compliance"] = {
+            "approved_fonts": compliant,
+            "non_compliant_fonts": non_compliant,
+            "compliance_score": round(brand_score, 2),
+            "brand_violations": violations,
+        }
+        result["typography_score"] = round(brand_score, 2)
+
+        if rag_context:
+            result["rag_context_used"] = rag_context[:200]
+
+        return result
+
     def _fallback_typography_analysis(self, image: np.ndarray, text_regions: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """Fallback typography analysis when FontComplianceChecker is not available"""
         try:

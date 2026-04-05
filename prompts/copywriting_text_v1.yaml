@@ -1,0 +1,62 @@
+version: "v1"
+name: "copywriting_text"
+description: >
+  Text-only tone and grammar compliance analysis. Used by VLLMToneAnalyzer,
+  OpenRouterToneAnalyzer, and OllamaAnalyzer. Placeholders are filled via
+  str.format() using user_settings values.
+
+# No system prompt — injected inline by each analyzer backend.
+
+user_template: |
+  Analyze this text for tone and grammar compliance.
+
+  Text: "{text}"
+
+  Settings: Formality {formality_score}/100, Confidence {confidence_level}, Warmth {warmth_score}/100, Energy {energy_score}/100, Readability {readability_level}, Persona {persona_type}, Emojis {allow_emojis}, Slang {allow_slang}.
+
+  CRITICAL GRAMMAR ANALYSIS - BE VERY STRICT:
+  You MUST find and report ALL grammar and capitalization errors. Do NOT give a high grammar score if there are errors.
+
+  SPECIFIC ERROR CHECKING:
+  - "Sing up" is WRONG - should be "Sign up" (incorrect capitalization of action verb)
+  - "sign up" is WRONG - should be "Sign up" (missing capitalization for action)
+  - Check for spelling mistakes and typos
+  - Check for punctuation errors
+  - Check for grammar and syntax issues
+
+  IMPORTANT: If you find "Sing up" in the text, you MUST:
+  1. Add it to grammar_errors: ["Incorrect capitalization: 'Sing up' should be 'Sign up'"]
+  2. Add it to grammar_suggestions: ["Change 'Sing up' to 'Sign up'"]
+  3. Lower the grammar_score to 60 or below
+  4. Add to failures: ["Capitalization error detected"]
+
+  Respond with ONLY this JSON format (no other text):
+  {{
+      "tone_analysis": {{
+          "formality_score": 75,
+          "confidence_level": "high",
+          "warmth_score": 60,
+          "energy_score": 50,
+          "sentiment": "positive",
+          "readability_score": 80
+      }},
+      "grammar_analysis": {{
+          "grammar_score": 90,
+          "grammar_errors": ["list specific grammar errors found"],
+          "grammar_suggestions": ["list specific suggestions for improvement"],
+          "spelling_errors": ["list spelling mistakes found"],
+          "punctuation_issues": ["list punctuation problems found"]
+      }},
+      "compliance": {{
+          "score": 0.9,
+          "failures": ["list any compliance failures"],
+          "suggestions": ["list improvement suggestions"],
+          "failure_summary": "Text meets requirements"
+      }},
+      "text_metrics": {{
+          "word_count": 5,
+          "sentence_count": 1,
+          "avg_words_per_sentence": 5.0,
+          "readability_level": "grade 8"
+      }}
+  }}

@@ -1,0 +1,74 @@
+version: "v1"
+name: "copywriting_image_vllm"
+description: >
+  Image OCR + grammar/tone analysis for VLLMToneAnalyzer (Qwen2.5-VL-3B via vLLM).
+  Lighter than the OpenRouter variant — no typography section (font detection is
+  handled by BrandComplianceJudge in the unified pipeline).
+
+user_template: |
+  Carefully examine the provided image and perform the following tasks in order:
+
+  1. **Text Extraction (OCR)**
+     - Extract **all visible text** from the image, including headlines, captions, UI labels, overlaid text, and fine print.
+     - Preserve the **exact wording**, punctuation, and casing as seen.
+     - Ignore illegible handwriting, logos, or decorative text.
+
+  2. **Grammar, Spelling, and Punctuation Analysis (CRITICAL)**
+     Be extremely strict and professional:
+     - Detect **spelling mistakes**, **grammar/syntax issues**, and **punctuation errors**.
+     - Identify **capitalization inconsistencies** and **word agreement errors**.
+     - Do **not** rewrite or paraphrase text; only identify and suggest minimal corrections.
+     - Mark each error with a **severity** (High | Medium | Low) and a **short explanation (≤20 words)**.
+
+  3. **Output Requirements**
+     - Respond with **only a valid JSON object** (no markdown, no code blocks, no text before or after the JSON).
+     - Start your response with `{{` and end with `}}`.
+     - All numeric scores must be integers (0–100) or floats (0.0–1.0).
+
+  4. **Settings Context**
+     Formality {formality_score}/100,
+     Confidence {confidence_level},
+     Warmth {warmth_score}/100,
+     Energy {energy_score}/100,
+     Readability {readability_level},
+     Persona {persona_type},
+     Emojis allowed: {allow_emojis},
+     Slang allowed: {allow_slang}.
+
+  5. **JSON Output Format**
+  {{
+      "extracted_text": "exact text content visible in the image",
+      "grammar_analysis": {{
+          "grammar_score": 85,
+          "errors": [
+              {{
+                  "error_type": "Spelling | Grammar | Punctuation | Capitalization | Agreement",
+                  "original_text": "orginal",
+                  "suggested_fix": "original",
+                  "explanation": "Correct spelling mistake",
+                  "severity": "Low"
+              }}
+          ],
+          "summary": "2 minor grammar and 1 punctuation issue detected"
+      }},
+      "spelling_errors": ["orginal"],
+      "punctuation_issues": ["Missing comma after 'However'"],
+      "text_metrics": {{
+          "word_count": 120,
+          "sentence_count": 8,
+          "avg_words_per_sentence": 15.0,
+          "readability_level": "grade 8"
+      }},
+      "visual_elements": {{
+          "colors": ["blue", "white"],
+          "layout": "centered text",
+          "branding": "company logo visible",
+          "text_placement": "center of image"
+      }},
+      "compliance": {{
+          "score": 0.92,
+          "failures": [],
+          "suggestions": ["Proofread to correct minor errors"],
+          "failure_summary": "Minor grammar and punctuation issues found"
+      }}
+  }}

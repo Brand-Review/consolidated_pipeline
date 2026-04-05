@@ -1,350 +1,348 @@
-# BrandGuard Complete Detection Flow
+# BrandGuard: Complete Detection Flow
 
-## Overview
-BrandGuard is a comprehensive brand compliance analysis system that processes images and documents to validate brand guidelines across multiple dimensions: color, typography, logo placement, and copywriting.
+End-to-end walkthrough of how a request moves through the pipeline, from upload to compliance result delivery.
 
-## System Architecture
+---
+
+## System Architecture Diagram
 
 ```mermaid
 graph TB
-    %% Input Layer
-    subgraph "Input Layer"
-        IMG[Upload Image/PDF<br/>User Input]
-        PREPROCESS[Image Preprocessing<br/>Resize, Format Conversion]
+    %% ── Input ──────────────────────────────────────────────────────────────
+    subgraph INPUT ["Input Layer"]
+        REQ["POST /api/analyze<br/>(multipart/form-data)"]
+        TYPES["input_type:<br/>file · text · url"]
     end
 
-    %% Main Orchestrator
-    subgraph "Main Orchestrator"
-        MAIN[BrandGuard Pipeline<br/>Main Orchestrator]
+    %% ── Flask ──────────────────────────────────────────────────────────────
+    subgraph FLASK ["Flask (app.py · port 5001)"]
+        ROUTE["Route: analyze_content()"]
+        SAVE["Save file → uploads/"]
+        BUILD["_build_analysis_options()"]
+        THREAD["threading.Thread (daemon)"]
+        ACK["HTTP 202 → {job_id, status: processing}"]
     end
 
-    %% Analysis Modules - Parallel Processing
-    subgraph "Analysis Modules - Parallel Processing"
+    %% ── Orchestrator ───────────────────────────────────────────────────────
+    subgraph ORCH ["PipelineOrchestrator"]
+        ORC["BasePipelineOrchestrator<br/>.analyze_content()"]
+        JUDGE["BrandComplianceJudge<br/>(OpenRouter LLM — optional)"]
+    end
+
+    %% ── Brand Context ──────────────────────────────────────────────────────
+    subgraph BRAND ["Brand Profile (if brand_id provided)"]
+        BSTORE["BrandStore (MongoDB)"]
+        TRAG["TextRAG (Qdrant)"]
+        ARAG["AssetRAG (Qdrant)"]
+    end
+
+    %% ── Analysis Modules ───────────────────────────────────────────────────
+    subgraph ANALYZERS ["Analysis Modules — run in parallel"]
         
-        %% Color Analysis Branch
-        subgraph "Color Analysis Branch"
-            COLOR_EXT[ColorPaletteExtractor<br/>K-Means Clustering<br/>8 Color Clusters]
-            COLOR_VAL[ColorPaletteValidator<br/>Brand Color Compliance]
+        subgraph COLOR ["Color Analysis"]
+            CK["K-Means Clustering<br/>(8 clusters default)"]
+            CV["CIEDE2000 matching<br/>WCAG 2.1 contrast"]
         end
-        
-        %% Typography Analysis Branch
-        subgraph "Typography Analysis Branch"
-            TEXT_EXT[TextExtractor<br/>PaddleOCR<br/>Text Recognition]
-            FONT_ID[FontIdentifier<br/>CNN Model<br/>49 Font Types]
-            TYPO_VAL[TypographyValidator<br/>Font Rules & Spacing]
+
+        subgraph TYPO ["Typography Analysis"]
+            POCR["PaddleOCR<br/>(PP-OCRv5)"]
+            FCNN["Font CNN<br/>(49 font categories)"]
+            TVAL["Font rule validation"]
         end
-        
-        %% Logo Analysis Branch with Decision Logic
-        subgraph "Logo Analysis Branch"
-            YOLO[YOLOv8 Nano Detection<br/>Custom Logo Model]
-            YOLO_DECISION{Objects Found?}
-            CONVERT[Convert to Logo Format<br/>Bounding Box Processing]
-            QWEN_ANALYSIS[Qwen2.5-VL Analysis<br/>VLLM Server Fallback]
-            LOGO_DET[Logo Detection & Analysis<br/>Hybrid System]
-            LOGO_VAL[LogoPlacementValidator<br/>Position & Size Rules]
+
+        subgraph COPY ["Copywriting Analysis"]
+            HYBRID["HybridToneAnalyzer<br/>(primary)"]
+            VLLMA["VLLMToneAnalyzer<br/>(fallback)"]
+            TRAD["Traditional NLP<br/>(final fallback)"]
         end
-        
-        %% Copywriting Analysis Branch
-        subgraph "Copywriting Analysis Branch"
-            COPY_ANALYZER[CopywritingAnalyzer<br/>Tone & Grammar Orchestrator]
-            VLLM_ANALYZER[VLLMToneAnalyzer<br/>Qwen2.5-VL-3B-Instruct<br/>Text & Image Analysis]
-            FALLBACK[Fallback Analysis<br/>Traditional Methods]
-        end
-        
-        %% PDF Processing Branch
-        subgraph "PDF Processing Branch"
-            PDF_EXT[PDFImageExtractor<br/>Document Processing]
+
+        subgraph LOGO ["Logo Detection"]
+            YOLO["YOLOv8 nano<br/>(~50 ms)"]
+            YDEC{Objects<br/>found?}
+            BBOX["Convert bounding boxes"]
+            QWEN["Qwen2.5-VL-3B via vLLM<br/>(fallback)"]
+            LVAL["Placement + brand<br/>compliance validator"]
         end
     end
 
-    %% VLLM Infrastructure
-    subgraph "VLLM Infrastructure"
-        VLLM_SERVER[VLLM Server<br/>Port 8000<br/>OpenAI Compatible API]
-        QWEN_MODEL[Qwen2.5-VL-3B-Instruct<br/>Multimodal LLM<br/>Vision + Language]
+    %% ── vLLM Infrastructure ────────────────────────────────────────────────
+    subgraph VLLM ["vLLM Server (port 8000)"]
+        VLLMS["OpenAI-compatible API"]
+        QWENM["Qwen2.5-VL-3B-Instruct<br/>(multimodal)"]
     end
 
-    %% Results Processing
-    subgraph "Results Processing"
-        AGGREGATE[Results Aggregation<br/>Combine All Analysis]
-        COMPLIANCE[Brand Compliance Validation<br/>Overall Assessment]
-        REPORT[Generate Compliance Report<br/>Structured JSON Output]
+    %% ── Results ────────────────────────────────────────────────────────────
+    subgraph RESULTS ["Results Processing"]
+        AGG["Aggregate model results"]
+        SCORE["_calculate_overall_compliance()<br/>weighted average"]
+        REPORT["Build JSON report"]
     end
 
-    %% Output Layer
-    subgraph "Output Layer"
-        JSON[Structured JSON Response<br/>Analysis Results]
-        UI[Web Interface Display<br/>Flask Demo Apps]
+    %% ── Delivery ───────────────────────────────────────────────────────────
+    subgraph DELIVERY ["Delivery"]
+        CB["POST callback_url<br/>X-Internal-Secret header"]
+        BRBE["br-be<br/>POST /api/internal/analysis/callback/:id"]
     end
 
-    %% Main Flow
-    IMG --> PREPROCESS
-    PREPROCESS --> MAIN
-    
-    %% Parallel Analysis Branches
-    MAIN --> COLOR_EXT
-    MAIN --> TEXT_EXT
-    MAIN --> FONT_ID
-    MAIN --> TYPO_VAL
-    MAIN --> YOLO
-    MAIN --> COPY_ANALYZER
-    MAIN --> PDF_EXT
-    
-    %% Color Analysis Flow
-    COLOR_EXT --> COLOR_VAL
-    COLOR_VAL --> AGGREGATE
-    
-    %% Typography Analysis Flow
-    TEXT_EXT --> AGGREGATE
-    FONT_ID --> AGGREGATE
-    TYPO_VAL --> AGGREGATE
-    
-    %% Logo Analysis Flow with Decision Logic
-    YOLO --> YOLO_DECISION
-    YOLO_DECISION -->|Found Objects| CONVERT
-    YOLO_DECISION -->|No Objects| QWEN_ANALYSIS
-    CONVERT --> LOGO_DET
-    QWEN_ANALYSIS --> VLLM_SERVER
-    VLLM_SERVER --> QWEN_MODEL
-    QWEN_MODEL --> VLLM_SERVER
-    VLLM_SERVER --> LOGO_DET
-    LOGO_DET --> LOGO_VAL
-    LOGO_VAL --> AGGREGATE
-    
-    %% Copywriting Analysis Flow
-    COPY_ANALYZER --> VLLM_ANALYZER
-    VLLM_ANALYZER --> VLLM_SERVER
-    VLLM_ANALYZER -->|Fallback| FALLBACK
-    FALLBACK --> AGGREGATE
-    VLLM_ANALYZER --> AGGREGATE
-    
-    %% PDF Processing Flow
-    PDF_EXT --> YOLO
-    
-    %% Results Processing Flow
-    AGGREGATE --> COMPLIANCE
-    COMPLIANCE --> REPORT
-    REPORT --> JSON
-    JSON --> UI
-    
+    %% ── Main flow ──────────────────────────────────────────────────────────
+    REQ --> TYPES --> ROUTE
+    ROUTE --> SAVE & BUILD
+    SAVE & BUILD --> THREAD
+    THREAD --> ACK
+    THREAD --> ORC
+
+    %% Brand context retrieval
+    ORC --> BSTORE & TRAG & ARAG
+
+    %% Parallel analyzer dispatch
+    ORC --> CK & POCR & HYBRID & YOLO
+
+    %% Color
+    CK --> CV
+
+    %% Typography
+    POCR --> FCNN --> TVAL
+
+    %% Copywriting with fallback chain
+    HYBRID -->|vLLM available| VLLMS
+    HYBRID -->|vLLM unavailable| VLLMA
+    VLLMA -->|model unavailable| TRAD
+
+    %% Logo with decision
+    YOLO --> YDEC
+    YDEC -->|yes| BBOX --> LVAL
+    YDEC -->|no| QWEN --> VLLMS
+    VLLMS --> QWENM --> VLLMS
+    VLLMS --> LVAL
+
+    %% vLLM shared by logo + copywriting
+    VLLMS -.->|also serves copywriting| HYBRID
+
+    %% Results aggregation
+    CV & TVAL & TRAD & LVAL --> AGG
+    BSTORE & TRAG & ARAG --> JUDGE
+    AGG --> JUDGE --> SCORE --> REPORT
+
+    %% Delivery
+    REPORT --> CB --> BRBE
+
     %% Styling
-    classDef inputLayer fill:#e3f2fd
-    classDef mainLayer fill:#f3e5f5
-    classDef analysisLayer fill:#e8f5e8
-    classDef vllmLayer fill:#fff3e0
-    classDef resultsLayer fill:#f1f8e9
-    classDef outputLayer fill:#e0f2f1
-    classDef decisionLayer fill:#fff8e1
-    
-    class IMG,PREPROCESS inputLayer
-    class MAIN mainLayer
-    class COLOR_EXT,COLOR_VAL,TEXT_EXT,FONT_ID,TYPO_VAL,LOGO_DET,LOGO_VAL,COPY_ANALYZER,VLLM_ANALYZER,FALLBACK,PDF_EXT analysisLayer
-    class VLLM_SERVER,QWEN_MODEL vllmLayer
-    class AGGREGATE,COMPLIANCE,REPORT resultsLayer
-    class JSON,UI outputLayer
-    class YOLO_DECISION decisionLayer
+    classDef input     fill:#dbeafe,stroke:#3b82f6
+    classDef flask     fill:#ede9fe,stroke:#7c3aed
+    classDef orch      fill:#fce7f3,stroke:#db2777
+    classDef brand     fill:#fef3c7,stroke:#d97706
+    classDef analyzer  fill:#dcfce7,stroke:#16a34a
+    classDef vllm      fill:#fff7ed,stroke:#ea580c
+    classDef results   fill:#f0fdf4,stroke:#15803d
+    classDef delivery  fill:#e0f2fe,stroke:#0284c7
+    classDef decision  fill:#fefce8,stroke:#ca8a04
+
+    class REQ,TYPES input
+    class ROUTE,SAVE,BUILD,THREAD,ACK flask
+    class ORC,JUDGE orch
+    class BSTORE,TRAG,ARAG brand
+    class CK,CV,POCR,FCNN,TVAL,HYBRID,VLLMA,TRAD,YOLO,BBOX,QWEN,LVAL analyzer
+    class VLLMS,QWENM vllm
+    class AGG,SCORE,REPORT results
+    class CB,BRBE delivery
+    class YDEC decision
 ```
 
-### Input Layer
-- **Image/PDF Upload**: Users upload images or PDF documents via web interface
-- **Preprocessing**: Automatic image resizing, format conversion, and validation
+---
 
-### Main Orchestrator
-- **BrandGuard Pipeline**: Coordinates all analysis modules and manages the overall workflow
-- **Parallel Processing**: All analysis modules run simultaneously for optimal performance
+## Phase-by-Phase Walkthrough
 
-## Analysis Modules
+### Phase 1 — Request Ingestion
 
-### 1. Color Analysis Branch
-**Purpose**: Extract and validate color palette compliance
+`POST /api/analyze` receives a `multipart/form-data` request.
 
-**Components**:
-- **ColorPaletteExtractor**: Uses K-means clustering to extract 8 dominant colors from the image
-- **ColorPaletteValidator**: Validates extracted colors against brand color guidelines
+**Input routing**
 
-**Process**:
-1. Extract color clusters using K-means algorithm
-2. Convert RGB values to hex codes
-3. Validate against brand color palette
-4. Generate compliance score and recommendations
+| `input_type` | Handling |
+|---|---|
+| `file` | Written to `uploads/<timestamp>_<filename>` |
+| `text` | Passed directly as `input_source` string |
+| `url` | Passed as URL string; resolved by the orchestrator |
 
-### 2. Typography Analysis Branch
-**Purpose**: Analyze text content, font identification, and typography compliance
+Allowed file types: `png jpg jpeg gif bmp tiff webp pdf txt doc docx` (max 50 MB).
 
-**Components**:
-- **TextExtractor**: Uses PaddleOCR (PP-OCRv5) for text recognition and extraction
-- **FontIdentifier**: CNN model trained on 49 font types for font recognition
-- **TypographyValidator**: Validates font usage, spacing, and typography rules
+`_build_analysis_options()` normalizes the flat form-data into a structured dict consumed by the orchestrator. A `job_id` is assigned (from `X-Request-ID` header or a fresh UUID). The route function immediately returns **HTTP 202** and dispatches `_run_analysis_background()` as a daemon thread.
 
-**Process**:
-1. Extract text content using PaddleOCR
-2. Identify fonts using CNN model
-3. Validate typography rules (font size, spacing, alignment)
-4. Generate typography compliance report
+---
 
-### 3. Logo Analysis Branch (Hybrid System)
-**Purpose**: Detect and validate logo placement and compliance
+### Phase 2 — Brand Context Loading
 
-**Components**:
-- **YOLOv8 Nano Detection**: Custom fine-tuned model for logo detection
-- **Qwen2.5-VL Analysis**: VLLM-based fallback for complex logo detection
-- **LogoPlacementValidator**: Validates logo position, size, and spacing rules
+When `brand_id` is present, `BasePipelineOrchestrator.analyze_content()` fetches brand context before dispatching analyzers:
 
-**Process**:
-1. **Primary Detection**: YOLOv8 Nano attempts logo detection
-2. **Decision Point**: Check if objects are found
-   - **If Found**: Convert bounding boxes to logo format
-   - **If Not Found**: Use Qwen2.5-VL via VLLM server for analysis
-3. **Logo Analysis**: Process detected logos for compliance
-4. **Validation**: Check position, size, and spacing against brand rules
+1. **BrandStore** (MongoDB) — retrieves structured rules extracted from the brand's guideline PDF.
+2. **TextRAG** (Qdrant) — semantic search over indexed guideline chunks to find rules relevant to the content being analyzed.
+3. **AssetRAG** (Qdrant) — image embedding similarity against the indexed approved/rejected image corpus.
 
-### 4. Copywriting Analysis Branch
-**Purpose**: Analyze text tone, grammar, and brand voice compliance
+Retrieved context is made available to `BrandComplianceJudge` after all analyzers complete.
 
-**Components**:
-- **VLLMToneAnalyzer**: Uses Qwen2.5-VL-3B-Instruct for advanced text analysis
-- **CopywritingAnalyzer**: Orchestrates tone and grammar analysis
-- **Fallback Analysis**: Traditional methods when VLLM is unavailable
+---
 
-**Process**:
-1. **Text Analysis**: Extract text from image or use provided text
-2. **VLLM Analysis**: Send to Qwen2.5-VL for tone, grammar, and sentiment analysis
-3. **Fallback**: Use traditional methods if VLLM fails
-4. **Compliance Check**: Validate against brand voice guidelines
+### Phase 3 — Parallel Analysis
 
-### 5. PDF Processing Branch
-**Purpose**: Handle PDF documents and extract images for analysis
+All enabled analyzers run concurrently. Each analyzer receives the same `input_source` and its own sub-dict from `analysis_options`.
 
-**Components**:
-- **PDFImageExtractor**: Extracts images from PDF pages
-- **Document Processing**: Converts PDF pages to images for analysis
+#### 3a. Color Analysis
 
-**Process**:
-1. Extract images from PDF pages
-2. Process each page through the main analysis pipeline
-3. Aggregate results across all pages
+```
+Image
+  └── K-Means clustering (default 8 clusters)
+        └── Extract dominant RGB colors → convert to hex
+              ├── CIEDE2000 comparison against brand palette
+              │     ├── primary_colors (threshold: 0–100)
+              │     ├── secondary_colors
+              │     └── accent_colors
+              └── WCAG 2.1 contrast ratio check (if enabled)
+```
 
-## VLLM Infrastructure
+If no brand palette is configured, the analyzer auto-passes with `compliance_score: 1.0` and a warning that no palette was provided.
 
-### VLLM Server
-- **Port**: 8000
-- **API**: OpenAI-compatible REST API
-- **Model**: Qwen2.5-VL-3B-Instruct
-- **Capabilities**: Multimodal analysis (text + images)
+#### 3b. Typography Analysis
 
-### Integration Points
-- **Logo Analysis**: Fallback when YOLO detection fails
-- **Copywriting Analysis**: Primary method for tone and grammar analysis
-- **Image Analysis**: Direct image processing for text extraction and analysis
+```
+Image
+  └── PaddleOCR (PP-OCRv5)
+        └── Text region detection + string extraction
+              └── Font CNN (49 categories)
+                    └── TypographyValidator
+                          ├── approved_fonts / forbidden_fonts check
+                          ├── font-size bounds (min/max)
+                          ├── line-height ratio
+                          └── letter-spacing
+```
 
-## Results Processing
+Default behavior when no font rules are configured: returns `compliance_score: 0.5` (neutral); no penalties applied.
 
-### Aggregation
-- **Results Aggregation**: Combines all analysis results into unified structure
-- **Scoring System**: Weighted scoring based on analysis importance
-- **Error Handling**: Graceful handling of failed analyses
+#### 3c. Copywriting Analysis — Fallback Chain
 
-### Compliance Validation
-- **Brand Compliance**: Overall assessment against brand guidelines
-- **Scoring**: Weighted compliance scores for each analysis type
-- **Recommendations**: Actionable suggestions for improvement
+```
+CopywritingAnalyzer
+  └── try: HybridToneAnalyzer
+        ├── call vLLM (Qwen2.5-VL-3B, port 8000)
+        │     → tone · sentiment · grammar · readability · prohibited content
+        └── on vLLM failure: call OpenRouter (Qwen2.5-VL-32B-Instruct)
+  └── fallback: VLLMToneAnalyzer (direct vLLM, no OpenRouter)
+  └── fallback: ToneAnalyzer + BrandVoiceValidator (traditional NLP)
+```
 
-### Report Generation
-- **Structured Output**: JSON format with all analysis results
-- **Compliance Summary**: Overall brand compliance assessment
-- **Detailed Results**: Specific findings for each analysis module
+Validated attributes: formality score, confidence level, warmth, energy, readability level, emoji/slang presence, financial guarantees, medical claims, competitor references.
 
-## Output Layer
+#### 3d. Logo Detection — Two-Stage Hybrid
 
-### JSON Response Structure
+```
+Image
+  └── YOLOv8 nano (~50 ms)
+        ├── Objects found?
+        │     YES → convert detections to logo format
+        │     NO  → Qwen2.5-VL-3B-Instruct via vLLM
+        │               → multimodal logo detection + brand description
+        └── LogoPlacementValidator
+              ├── Placement zone check (top-left / top-right / etc.)
+              ├── Size fraction check (min_logo_size – max_logo_size)
+              ├── Edge clearance (min_edge_distance)
+              └── Aspect ratio tolerance (±20% default)
+```
+
+Images larger than 512px are automatically downscaled before the Qwen call to reduce latency.
+
+---
+
+### Phase 4 — Brand Compliance Judgment
+
+After all analyzers return, `BrandComplianceJudge` is invoked when a `brand_id` is present. It:
+
+1. Receives all analyzer scores plus the retrieved brand rules.
+2. Calls OpenRouter (Qwen2.5-VL-32B-Instruct) with a structured prompt.
+3. Returns a verdict with rule citations and adjusted scores where the LLM identifies discrepancies.
+
+When no `brand_id` is provided, this phase is skipped and raw analyzer scores are used directly.
+
+---
+
+### Phase 5 — Score Aggregation
+
+```python
+# pipeline_orchestrator.py (via base_orchestrator.py)
+overall_score = sum(
+    model_result['compliance_score'] * weight
+    for model_name, weight in weights.items()
+    if model_name in model_results
+)
+```
+
+Default weights are equal (25% each). Custom weights can be passed as a JSON string in the `scoring_weights` form field:
+
 ```json
-{
-  "color_analysis": {
-    "extracted_colors": [...],
-    "compliance_score": 0.85,
-    "recommendations": [...]
-  },
-  "typography_analysis": {
-    "extracted_text": "...",
-    "font_identification": {...},
-    "compliance_score": 0.90
-  },
-  "logo_analysis": {
-    "detected_logos": [...],
-    "placement_validation": {...},
-    "compliance_score": 0.95
-  },
-  "copywriting_analysis": {
-    "tone_analysis": {...},
-    "grammar_analysis": {...},
-    "compliance_score": 0.88
-  },
-  "overall_compliance": 0.90,
-  "recommendations": [...]
-}
+{ "color_analysis": 0.15, "typography_analysis": 0.25,
+  "copywriting_analysis": 0.50, "logo_analysis": 0.10 }
 ```
 
-### Web Interface
-- **Flask Demo Apps**: Multiple demo applications for different use cases
-- **Real-time Processing**: Live analysis with progress indicators
-- **Results Visualization**: Interactive display of analysis results
+Score thresholds:
 
-## Key Features
+| Range | Status |
+|---|---|
+| 0.90 – 1.00 | Passed — brand compliant |
+| 0.70 – 0.89 | Warning — minor issues |
+| 0.50 – 0.69 | Moderate — improvements needed |
+| 0.00 – 0.49 | Critical — immediate action required |
 
-### Hybrid Detection System
-- **YOLO + VLLM**: Combines fast object detection with advanced AI analysis
-- **Fallback Mechanisms**: Graceful degradation when services are unavailable
-- **Multi-modal Analysis**: Handles text, images, and documents
+---
 
-### Parallel Processing
-- **Simultaneous Analysis**: All modules run in parallel for optimal performance
-- **Independent Modules**: Each analysis type is independent and can be scaled separately
-- **Error Isolation**: Failures in one module don't affect others
+### Phase 6 — Result Delivery
 
-### Brand Compliance
-- **Comprehensive Coverage**: Color, typography, logo, and copywriting analysis
-- **Configurable Rules**: Brand guidelines can be customized per client
-- **Detailed Reporting**: Actionable recommendations for compliance improvement
+The background thread POSTs the final JSON payload to `callback_url` with the `X-Internal-Secret` header matching the value configured in both services:
 
-## Performance Characteristics
+```python
+requests.post(
+    callback_url,
+    json={"job_id": job_id, "status": "completed", "results": analysis_results},
+    headers={"X-Internal-Secret": INTERNAL_WEBHOOK_SECRET},
+    timeout=30,
+)
+```
 
-### Processing Time
-- **Color Analysis**: ~2-3 seconds
-- **Typography Analysis**: ~3-5 seconds
-- **Logo Analysis**: ~5-10 seconds (depending on YOLO vs VLLM)
-- **Copywriting Analysis**: ~5-15 seconds (depending on VLLM availability)
-- **Total Processing**: ~10-20 seconds per image
+On analysis failure, `status` is `"failed"` and an `error` key is included instead of `results`.
 
-### Accuracy
-- **Color Extraction**: 95%+ accuracy for dominant colors
-- **Text Extraction**: 90%+ accuracy with PaddleOCR
-- **Font Identification**: 85%+ accuracy across 49 font types
-- **Logo Detection**: 90%+ accuracy with hybrid YOLO+VLLM system
-- **Tone Analysis**: 85%+ accuracy with VLLM analysis
+---
 
-## Error Handling
+## Error Handling and Graceful Degradation
 
-### Graceful Degradation
-- **VLLM Unavailable**: Falls back to traditional analysis methods
-- **Model Loading Failures**: Continues with available models
-- **Network Issues**: Retries with exponential backoff
-- **Invalid Input**: Returns detailed error messages
+| Failure | Behavior |
+|---|---|
+| vLLM server down | Copywriting falls back to OpenRouter; logo falls back to YOLOv8-only |
+| OpenRouter unavailable | Copywriting falls back to traditional NLP |
+| One analyzer crashes | Other analyzers complete; failed analyzer score is excluded from weighted average |
+| Brand profile not found | Analysis proceeds with static config defaults |
+| File too large (>50 MB) | Rejected at the Flask layer with HTTP 400 |
+| Unsupported file type | Rejected at the Flask layer with HTTP 400 |
+| Callback POST fails | Error is logged; no retry (br-be polls or handles timeout) |
 
-### Logging and Monitoring
-- **Comprehensive Logging**: Detailed logs for debugging and monitoring
-- **Performance Metrics**: Processing time and accuracy tracking
-- **Error Reporting**: Detailed error messages and stack traces
+---
 
-## Future Enhancements
+## PDF Document Handling
 
-### Planned Features
-- **Real-time Processing**: WebSocket support for live analysis
-- **Batch Processing**: Support for multiple image processing
-- **Custom Models**: Client-specific model training
-- **API Versioning**: Backward compatibility for API changes
-- **Cloud Deployment**: Scalable cloud infrastructure
+When a PDF is uploaded, `PDFImageExtractor` converts each page to an image before dispatching to the analyzers. The analysis runs per-page and results are aggregated.
 
-### Performance Optimizations
-- **Model Quantization**: Reduced model size and faster inference
-- **Caching**: Intelligent caching of analysis results
-- **Load Balancing**: Distributed processing across multiple servers
-- **GPU Acceleration**: CUDA support for faster processing
+---
+
+## vLLM Infrastructure
+
+The vLLM server is shared by two analyzers:
+
+| Consumer | Model | Port | Usage |
+|---|---|---|---|
+| Logo analyzer (fallback) | Qwen2.5-VL-3B-Instruct | 8000 | Logo detection + description |
+| Copywriting analyzer (primary) | Qwen2.5-VL-3B-Instruct | 8000 | Tone, grammar, brand voice |
+
+The API is OpenAI-compatible (`/v1/chat/completions`). Images are base64-encoded and embedded in the message payload.
+
+Start the server:
+```bash
+cd ../LogoDetector && python setup_vllm.py
+```
+
+Both analyzers configure independent timeouts (`qwen_timeout` in `configs/logo_detection.yaml`).

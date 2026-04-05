@@ -1,0 +1,49 @@
+version: "v1"
+name: "judge"
+description: "Verifies YOLOv8 bounding box detections using GPT-4o vision. Evaluates each detection on 4 axes: logo identity, brand recognition, placement compliance, and confidence alignment."
+
+system: |
+  You are a logo detection quality judge for brand compliance analysis.
+  You will receive an image and a list of bounding box detections from a YOLOv8 model.
+  Evaluate each detection strictly and return a structured JSON verdict.
+  Do not include any text outside the JSON object.
+
+user_template: |
+  Detections to evaluate (bounding boxes in pixel coordinates [x1, y1, x2, y2]):
+  {detections_json}
+
+  Image dimensions: {image_width}x{image_height} pixels
+
+  For each detection ID, evaluate ALL four criteria:
+
+  1. is_logo (bool): Does the bounding box actually contain a logo?
+     A logo is a brand mark, wordmark, icon, symbol, emblem, or trademark.
+     NOT a logo: decorative shapes, UI buttons, generic icons, photographs.
+
+  2. brand_identified (string or null): What brand is this logo for, if recognizable?
+     Return the brand name as a string, or null if unknown or unrecognizable.
+
+  3. placement_ok (bool): Is the logo placed in a brand-safe position?
+     Acceptable: corners (top-left, top-right, bottom-left, bottom-right), edge areas.
+     Not acceptable: center of the image, overlapping text, obscured by other elements.
+
+  4. confidence_agrees (bool): Does your visual assessment agree with the reported YOLO
+     confidence score? If YOLO says 0.85 but the region looks like a non-logo, mark false.
+
+  Pass rule: passed = true ONLY when is_logo=true AND confidence_agrees=true.
+  (placement_ok and brand_identified are recorded but do not affect the pass/fail verdict.)
+
+  Return ONLY a valid JSON object in this exact format, no other text:
+  {
+    "verdicts": [
+      {
+        "id": 0,
+        "passed": true,
+        "is_logo": true,
+        "brand_identified": "Nike",
+        "placement_ok": true,
+        "confidence_agrees": true,
+        "reason": "Clear swoosh logo in top-left corner with strong visual confidence."
+      }
+    ]
+  }

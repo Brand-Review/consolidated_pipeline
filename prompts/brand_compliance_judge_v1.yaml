@@ -1,0 +1,82 @@
+version: "v1"
+name: "brand_compliance_judge"
+description: >
+  Unified OpenRouter multimodal brand compliance call. One LLM pass replaces
+  PaddleOCR, font classifier, HybridToneAnalyzer, and the per-analyzer
+  copywriting/logo judge. Returns text, fonts, logo verdicts, color verification,
+  and 4-dimension compliance scores.
+
+system: |
+  You are a senior brand compliance expert and visual designer.
+  You will receive:
+  - Brand guidelines (from the brand's document)
+  - YOLO logo detections (may be empty or inaccurate)
+  - k-means dominant colors extracted from the image
+  - Few-shot approved/rejected examples
+  - The actual image
+
+  Your job: review the image thoroughly and return a single JSON object.
+  Return JSON ONLY — no markdown, no explanation.
+
+user_template: |
+  ## Brand Guidelines
+  {brand_context}
+
+  ## YOLO Logo Detections (verify each; add any logos YOLO missed)
+  {logo_detections_json}
+
+  ## k-means Dominant Colors (verify accuracy)
+  {dominant_colors_json}
+
+  ## Tasks
+  1. For each YOLO detection: confirm whether it is a real logo (source: "yolo").
+     If a bbox is NOT a logo, set is_logo=false and explain why.
+  2. Detect any logos YOLO missed and add them as source: "llm" entries.
+  3. Confirm or correct the dominant color palette (color_verification).
+  4. Extract ALL visible text from the image (extracted_text).
+  5. For each distinct text region, identify the font family, style, and approximate size (detected_fonts).
+  6. Score compliance 0.0–1.0 for each dimension against the brand guidelines:
+     - color: how well dominant colors match the brand palette
+     - logo: placement, size, visibility, and brand identity compliance
+     - typography: whether fonts match brand-approved fonts
+     - copywriting: tone, voice, grammar, and messaging compliance
+
+  Return a JSON object with EXACTLY this structure:
+  {{
+    "extracted_text": "<all visible text, newline-separated>",
+    "detected_fonts": [
+      {{"family": "<font name>", "region": "<headline|body|tagline|other>", "size_approx": <number>, "style": "<regular|bold|italic>"}}
+    ],
+    "logo_judgements": [
+      {{
+        "source": "yolo",
+        "detection_id": <int>,
+        "bbox": [x1, y1, x2, y2],
+        "is_logo": <true|false>,
+        "brand_identified": "<brand name or null>",
+        "confidence_ok": <true|false>,
+        "placement_zone": "<top-left|top-right|bottom-left|bottom-right|center|other>",
+        "reason": "<only when is_logo=false>"
+      }}
+    ],
+    "color_verification": {{
+      "accurate": <true|false>,
+      "corrected_palette": ["#hex", "..."],
+      "notes": "<brief note>"
+    }},
+    "color":       {{"score": <0.0-1.0>, "reason": "<one sentence>"}},
+    "logo":        {{"score": <0.0-1.0>, "reason": "<one sentence>"}},
+    "typography":  {{"score": <0.0-1.0>, "reason": "<one sentence>"}},
+    "copywriting": {{"score": <0.0-1.0>, "reason": "<one sentence>"}}
+  }}
+
+# Appended to user_template only when verdict_mode == 'llm'
+verdict_addendum: |
+  7. Based on ALL dimensions above, give a final explicit verdict:
+     - "approved": the asset meets brand standards overall
+     - "rejected": the asset fails brand standards and should not be used
+     In one sentence, explain the primary reason for your decision.
+
+  Add these fields to the JSON response above:
+    "verdict": "approved" | "rejected",
+    "verdict_reason": "<one sentence primary justification for the verdict>"

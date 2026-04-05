@@ -55,7 +55,13 @@ class ColorAnalyzer:
             self.color_extractor = None
             self.color_validator = None
     
-    def analyze_colors(self, image: np.ndarray, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def analyze_colors(
+        self,
+        image: np.ndarray,
+        options: Optional[Dict[str, Any]] = None,
+        rag_context: str = "",
+        few_shot_examples: Optional[List[Dict]] = None,
+    ) -> Dict[str, Any]:
         """Perform color analysis on an image"""
         try:
             if not options:

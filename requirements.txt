@@ -50,8 +50,18 @@ scikit-image==0.24.0
 # Development dependencies
 pytest>=6.2.0
 pytest-cov>=2.12.0
+pytest-html>=4.0.0
 black>=21.0.0
 flake8>=3.9.0
 mypy>=0.910
+
+# Agentic logo pipeline — LLM Judge + Langfuse observability
+langfuse>=2.0.0
+
+# Brand Profile RAG — guideline ingestion, vector search, multi-modal retrieval
+sentence-transformers>=3.0.0    # multilingual-e5-large text embeddings
+qdrant-client>=1.9.0            # Qdrant vector DB client
+open-clip-torch>=2.24.0         # CLIP image embeddings (ViT-B/32)
+pymongo>=4.6.0                  # MongoDB brand profile metadata store
 
 

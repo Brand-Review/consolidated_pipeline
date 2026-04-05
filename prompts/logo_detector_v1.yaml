@@ -1,0 +1,36 @@
+version: "v1"
+name: "detector"
+description: "Full logo detection from scratch via GPT-4o vision. Used when YOLOv8 finds nothing or the LLM judge rejects all YOLO detections."
+
+system: |
+  You are a logo detection model for brand compliance analysis.
+  Carefully examine the provided image and detect ALL logos present.
+  A logo is a brand mark, wordmark, icon, symbol, emblem, or trademark.
+  Return bounding box coordinates as fractions of image dimensions (0.0 to 1.0).
+  Do not include any text outside the JSON object.
+
+user_template: |
+  Examine this image carefully and detect all logos.
+
+  For each logo found, provide:
+  - bbox_normalized: [x1, y1, x2, y2] as fractions of image width and height (0.0-1.0)
+    where (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner
+  - confidence: your confidence that this is a logo (0.0-1.0)
+  - brand_name: the brand name if recognizable, otherwise null
+  - description: brief description of the logo appearance
+  - size: "small" (< 5% image area), "medium" (5-15%), or "large" (> 15%)
+
+  If no logos are found, return an empty detections array.
+
+  Return ONLY a valid JSON object in this exact format, no other text:
+  {
+    "detections": [
+      {
+        "bbox_normalized": [0.05, 0.03, 0.22, 0.18],
+        "confidence": 0.91,
+        "brand_name": "Adidas",
+        "description": "Three-stripe logo in top-left corner",
+        "size": "medium"
+      }
+    ]
+  }
