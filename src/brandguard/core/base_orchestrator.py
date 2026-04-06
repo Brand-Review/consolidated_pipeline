@@ -287,12 +287,13 @@ class BasePipelineOrchestrator:
                         if logo_judgements else 0.0
                     )
 
+                    judge_logo_score = judge_verdict.get("logo", {}).get("score")
                     model_results['logo_analysis'] = {
                         **yolo_logo_result,
                         "logo_judgements": logo_judgements,
                         "scores": {
                             **yolo_logo_result.get("scores", {}),
-                            "overall": round(logo_score, 3),
+                            "overall": round(judge_logo_score if judge_logo_score is not None else logo_score, 3),
                         },
                         "judge_scores": {
                             "score": judge_verdict.get("logo", {}).get("score", logo_score),

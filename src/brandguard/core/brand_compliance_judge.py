@@ -57,6 +57,8 @@ class BrandComplianceJudge:
     ) -> None:
         self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
         self.model = model or os.environ.get("OPENROUTER_MODEL", _DEFAULT_MODEL)
+        # Populated after each run() call; readable by eval harnesses for token/cost tracking
+        self.last_usage: Dict[str, Any] = {}
 
     def run(
         self,
@@ -130,7 +132,9 @@ class BrandComplianceJudge:
                 timeout=120,
             )
             response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
+            response_data = response.json()
+            self.last_usage = response_data.get("usage", {})
+            content = response_data["choices"][0]["message"]["content"]
             result = json.loads(content)
             logger.info(
                 "[BrandComplianceJudge] Scores — color=%.2f logo=%.2f typography=%.2f copywriting=%.2f",
