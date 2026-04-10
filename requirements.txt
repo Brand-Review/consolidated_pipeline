@@ -28,16 +28,22 @@ PyYAML>=6.0
 pydantic>=1.9.0
 
 # Web Framework and Utilities
-Flask>=2.0.0
-Flask-CORS>=3.0.10
-Werkzeug>=2.0.0
 requests>=2.25.0
+Werkzeug>=2.0.0  # secure_filename utility
 
-# FastAPI and JSON API support
+# Async task queue
+celery[redis]>=5.3.0
+redis>=5.0.0
+
+# FastAPI and ASGI server
 fastapi[all]>=0.111.0
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6  # file uploads
 aiofiles>=23.0.0  # static file serving
+slowapi>=0.1.9  # rate limiting
+
+# Colour science — perceptual colour difference (CIEDE2000)
+colour-science>=0.4.2
 
 # Visualization and Utilities
 matplotlib>=3.5.0

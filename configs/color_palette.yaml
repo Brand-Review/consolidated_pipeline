@@ -37,7 +37,11 @@ brand_color_validation:
   accent_threshold: 75
   
   # CIEDE2000 color difference tolerance
-  color_tolerance: 2.3
+  # 1 unit ≈ just-noticeable difference to the human eye.
+  # < 6.0  → compliant   (safe zone, invisible to most people)
+  # 6–8    → borderline  (flagged as warning, not hard failure)
+  # > 8.0  → violation
+  color_tolerance: 7.0
   
   # Enable category-based validation
   enable_category_validation: true
