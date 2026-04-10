@@ -1,0 +1,91 @@
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# BrandGuard consolidated_pipeline stack
+#
+# Services:
+#   redis          — Celery broker + result backend
+#   api            — FastAPI (uvicorn) — receives requests, enqueues Celery tasks
+#   celery-worker  — Processes analysis tasks from the Redis queue
+# ---------------------------------------------------------------------------
+
+x-pipeline-env: &pipeline-env
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  INTERNAL_WEBHOOK_SECRET: ${INTERNAL_WEBHOOK_SECRET:-internal-brandguard-secret}
+  # Pass through any other env vars the pipeline needs
+  MONGODB_URI: ${MONGODB_URI:-}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  S3_BUCKET: ${S3_BUCKET:-}
+
+services:
+  # ── Redis ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes  # persist queue to disk
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI (web) ─────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ..
+      dockerfile: consolidated_pipeline/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      <<: *pipeline-env
+    volumes:
+      - uploads:/app/uploads
+      - results:/app/results
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: uvicorn app:app --host 0.0.0.0 --port 5001 --workers 2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Celery worker ─────────────────────────────────────────────────────────
+  celery-worker:
+    build:
+      context: ..
+      dockerfile: consolidated_pipeline/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *pipeline-env
+    volumes:
+      - uploads:/app/uploads   # shares temp upload files with the API container
+      - results:/app/results
+    depends_on:
+      redis:
+        condition: service_healthy
+    # concurrency=1: one heavy ML job at a time; scale via replicas instead
+    command: >
+      celery -A src.brandguard.celery_app worker
+      --loglevel=info
+      --concurrency=1
+      --queues=celery
+    healthcheck:
+      test: ["CMD", "celery", "-A", "src.brandguard.celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+
+volumes:
+  redis-data:
+  uploads:
+  results:
