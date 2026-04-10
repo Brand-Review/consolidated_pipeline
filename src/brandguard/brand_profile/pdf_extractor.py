@@ -6,11 +6,12 @@ Parses brand guideline PDFs into:
 """
 
 from __future__ import annotations
-import json
 import logging
 import os
 import re
 from typing import Dict, Any, List, Tuple
+
+from ..core.llm_client import LLMClient, LLMResponseError
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +63,11 @@ class PDFRuleExtractor:
     Uses PyMuPDF for text extraction and OpenRouter for structured rule extraction.
     """
 
-    def __init__(self, openrouter_api_key: str = None, model: str = "openai/gpt-4o-mini"):
+    def __init__(self, openrouter_api_key: str = None, model: str = None):
         self.api_key = openrouter_api_key or os.environ.get("OPENROUTER_API_KEY", "")
-        self.model = model
+        # model defaults to OPENROUTER_MODEL env var so one env var controls all LLM calls
+        self.model = model or os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+        self.llm = LLMClient(api_key=self.api_key, model=self.model)
 
     def extract(self, pdf_path: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
         """
@@ -146,34 +149,21 @@ class PDFRuleExtractor:
             return self._empty_rules()
 
         try:
-            import requests
-
             # Truncate to avoid token limits (~8k chars)
             truncated = full_text[:8000]
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": _OPENROUTER_RULE_EXTRACTION_PROMPT + truncated,
-                    }
-                ],
-                "temperature": 0.0,
-                "response_format": {"type": "json_object"},
-            }
-            response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
+            messages = [
+                {
+                    "role": "user",
+                    "content": _OPENROUTER_RULE_EXTRACTION_PROMPT + truncated,
+                }
+            ]
+            result, _ = self.llm.chat(
+                messages,
+                response_format={"type": "json_object"},
                 timeout=60,
             )
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
-            return json.loads(content)
-        except Exception as e:
+            return result
+        except LLMResponseError as e:
             logger.error(f"LLM rule extraction failed: {e}")
             return self._empty_rules()
 

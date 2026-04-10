@@ -23,8 +23,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-import requests
-
+from .llm_client import LLMClient, LLMResponseError
 from .prompt_registry import registry as _prompt_registry
 
 logger = logging.getLogger(__name__)
@@ -59,6 +58,7 @@ class BrandComplianceJudge:
         self.model = model or os.environ.get("OPENROUTER_MODEL", _DEFAULT_MODEL)
         # Populated after each run() call; readable by eval harnesses for token/cost tracking
         self.last_usage: Dict[str, Any] = {}
+        self.llm = LLMClient(api_key=self.api_key, model=self.model)
 
     def run(
         self,
@@ -117,25 +117,10 @@ class BrandComplianceJudge:
         )
 
         try:
-            response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "messages": messages,
-                    "temperature": 0.0,
-                    "response_format": {"type": "json_object"},
-                },
-                timeout=120,
+            result, usage = self.llm.chat(
+                messages, response_format={"type": "json_object"}
             )
-            response.raise_for_status()
-            response_data = response.json()
-            self.last_usage = response_data.get("usage", {})
-            content = response_data["choices"][0]["message"]["content"]
-            result = json.loads(content)
+            self.last_usage = usage
             logger.info(
                 "[BrandComplianceJudge] Scores — color=%.2f logo=%.2f typography=%.2f copywriting=%.2f",
                 result.get("color", {}).get("score", 0),
@@ -144,7 +129,7 @@ class BrandComplianceJudge:
                 result.get("copywriting", {}).get("score", 0),
             )
             return result
-        except Exception as e:
+        except LLMResponseError as e:
             logger.error(f"[BrandComplianceJudge] LLM call failed: {e}")
             return None
 
