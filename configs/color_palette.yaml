@@ -37,7 +37,7 @@ brand_color_validation:
   accent_threshold: 75
   
   # CIEDE2000 color difference tolerance
-  color_tolerance: 2.3
+  color_tolerance: 7.0
   
   # Enable category-based validation
   enable_category_validation: true

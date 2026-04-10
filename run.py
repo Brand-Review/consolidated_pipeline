@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BrandGuard Consolidated Pipeline Startup Script
+BrandGuard Consolidated Pipeline Startup Script — FastAPI Edition
 Quick and easy way to start the unified brand compliance analysis system
 """
 
@@ -10,81 +10,73 @@ import subprocess
 import argparse
 from pathlib import Path
 
+
 def check_python_version():
-    """Check if Python version is compatible"""
     if sys.version_info < (3, 8):
         print("❌ Error: Python 3.8+ is required")
         print(f"Current version: {sys.version}")
         sys.exit(1)
     print(f"✅ Python version: {sys.version.split()[0]}")
 
+
 def check_dependencies():
-    """Check if required dependencies are installed"""
     required_packages = [
-        ('flask', 'flask'),
-        ('opencv-python', 'cv2'),
-        ('numpy', 'numpy'),
-        ('pillow', 'PIL'),
-        ('torch', 'torch'),
-        ('transformers', 'transformers'),
-        ('scikit-learn', 'sklearn')
+        ("fastapi", "fastapi"),
+        ("uvicorn", "uvicorn"),
+        ("slowapi", "slowapi"),
+        ("opencv-python", "cv2"),
+        ("numpy", "numpy"),
+        ("pillow", "PIL"),
+        ("torch", "torch"),
+        ("transformers", "transformers"),
+        ("scikit-learn", "sklearn"),
+        ("python-multipart", "multipart"),
+        ("aiofiles", "aiofiles"),
     ]
-    
-    missing_packages = []
-    for package_name, import_name in required_packages:
+
+    missing = []
+    for pkg, imp in required_packages:
         try:
-            __import__(import_name)
+            __import__(imp)
         except ImportError:
-            missing_packages.append(package_name)
-    
-    if missing_packages:
-        print(f"❌ Missing dependencies: {', '.join(missing_packages)}")
-        print("Please install them using: pip install -r requirements.txt")
+            missing.append(pkg)
+
+    if missing:
+        print(f"❌ Missing dependencies: {', '.join(missing)}")
+        print("Install via: pip install -r requirements.txt")
         return False
-    
     print("✅ All required dependencies are installed")
     return True
 
+
 def create_directories():
-    """Create necessary directories if they don't exist"""
-    directories = ['configs', 'uploads', 'results', 'models']
-    
-    for directory in directories:
-        Path(directory).mkdir(exist_ok=True)
-        print(f"📁 Created directory: {directory}")
+    for d in ("configs", "uploads", "results", "models"):
+        Path(d).mkdir(exist_ok=True)
+        print(f"📁 Created directory: {d}")
+
 
 def check_config_files():
-    """Check if configuration files exist, create defaults if not"""
-    config_dir = Path('configs')
-    
-    if not config_dir.exists():
-        config_dir.mkdir(exist_ok=True)
-    
-    # Create default color palette config if it doesn't exist
-    color_config = config_dir / 'color_palette.yaml'
-    if not color_config.exists():
-        create_default_color_config(color_config)
-    
-    # Create default typography config if it doesn't exist
-    typography_config = config_dir / 'typography_rules.yaml'
-    if not typography_config.exists():
-        create_default_typography_config(typography_config)
-    
-    # Create default brand voice config if it doesn't exist
-    voice_config = config_dir / 'brand_voice.yaml'
-    if not voice_config.exists():
-        create_default_brand_voice_config(voice_config)
-    
-    # Create default logo detection config if it doesn't exist
-    logo_config = config_dir / 'logo_detection.yaml'
-    if not logo_config.exists():
-        create_default_logo_config(logo_config)
-    
+    config_dir = Path("configs")
+    config_dir.mkdir(exist_ok=True)
+
+    files_funcs = [
+        (config_dir / "color_palette.yaml", _create_default_color_config),
+        (config_dir / "typography_rules.yaml", _create_default_typography_config),
+        (config_dir / "brand_voice.yaml", _create_default_brand_voice_config),
+        (config_dir / "logo_detection.yaml", _create_default_logo_config),
+    ]
+    for fp, func in files_funcs:
+        if not fp.exists():
+            func(fp)
     print("✅ Configuration files checked/created")
 
-def create_default_color_config(config_path):
-    """Create default color palette configuration"""
-    config_content = """# Default Brand Color Palette Configuration
+
+# ---------------------------------------------------------------------------
+# Default YAML generators (unchanged from original run.py)
+# ---------------------------------------------------------------------------
+
+def _create_default_color_config(config_path):
+    content = """# Default Brand Color Palette Configuration
 brand_palette:
   name: "Default"
   primary_colors:
@@ -115,12 +107,12 @@ brand_palette:
       rgb: [16, 185, 129]
       tolerance: 0.1
 """
-    with open(config_path, 'w') as f:
-        f.write(config_content)
+    with open(config_path, "w") as f:
+        f.write(content)
 
-def create_default_typography_config(config_path):
-    """Create default typography configuration"""
-    config_content = """# Default Typography Rules Configuration
+
+def _create_default_typography_config(config_path):
+    content = """# Default Typography Rules Configuration
 typography_rules:
   approved_fonts:
     - "Arial"
@@ -136,12 +128,12 @@ typography_rules:
   line_height_ratio: 1.5
   letter_spacing: 0.0
 """
-    with open(config_path, 'w') as f:
-        f.write(config_content)
+    with open(config_path, "w") as f:
+        f.write(content)
 
-def create_default_brand_voice_config(config_path):
-    """Create default brand voice configuration"""
-    config_content = """# Default Brand Voice Configuration
+
+def _create_default_brand_voice_config(config_path):
+    content = """# Default Brand Voice Configuration
 brand_voice:
   formality_score: 60
   confidence_level: "balanced"
@@ -155,12 +147,12 @@ brand_voice:
   no_medical_claims: true
   no_competitor_bashing: true
 """
-    with open(config_path, 'w') as f:
-        f.write(config_content)
+    with open(config_path, "w") as f:
+        f.write(content)
 
-def create_default_logo_config(config_path):
-    """Create default logo detection configuration"""
-    config_content = """# Default Logo Detection Configuration
+
+def _create_default_logo_config(config_path):
+    content = """# Default Logo Detection Configuration
 logo_detection:
   confidence_threshold: 0.5
   iou_threshold: 0.45
@@ -169,97 +161,78 @@ logo_detection:
   max_logo_size: 500
   placement_rules: {}
 """
-    with open(config_path, 'w') as f:
-        f.write(config_content)
+    with open(config_path, "w") as f:
+        f.write(content)
 
-def start_server(host='0.0.0.0', port=5000, debug=False):
-    """Start the Flask server"""
-    print(f"🚀 Starting BrandGuard Pipeline on {host}:{port}")
-    print(f"🌐 Web interface: http://{host}:{port}")
-    print(f"📡 API base: http://{host}:{port}/api")
-    print(f"🔍 Health check: http://{host}:{port}/api/health")
-    print("\n" + "="*50)
-    
-    # Set environment variables
-    os.environ['FLASK_APP'] = 'app.py'
-    os.environ['FLASK_ENV'] = 'development' if debug else 'production'
-    
-    # Start the server
+
+# ---------------------------------------------------------------------------
+# Server starter — uvicorn (replaces Flask app.run)
+# ---------------------------------------------------------------------------
+
+def start_server(host: str = "0.0.0.0", port: int = 5001, reload: bool = False):
+    """Launch uvicorn with the FastAPI app."""
+    print(f"🚀 Starting BrandGuard FastAPI on {host}:{port}")
+    print(f"🌐 Web UI:    http://{host}:{port}")
+    print(f"📡 API docs:  http://{host}:{port}/docs")
+    print(f"🔍 Health:    http://{host}:{port}/api/health")
+    print("=" * 50)
+
+    cmd = ["uvicorn", "app:app", "--host", host, "--port", str(port)]
+    if reload:
+        cmd.append("--reload")
+
     try:
-        from app import app
-        app.run(
-            host=host,
-            port=port,
-            debug=debug,
-            use_reloader=debug
-        )
+        subprocess.run(cmd)
     except KeyboardInterrupt:
         print("\n🛑 Server stopped by user")
     except Exception as e:
         print(f"❌ Error starting server: {e}")
         sys.exit(1)
 
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 def main():
-    """Main function"""
     parser = argparse.ArgumentParser(
-        description='BrandGuard Consolidated Pipeline Startup Script',
+        description="BrandGuard Consolidated Pipeline — FastAPI Edition",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python run.py                    # Start with default settings
-  python run.py --host 127.0.0.1  # Start on localhost only
-  python run.py --port 8080       # Start on port 8080
-  python run.py --debug           # Start in debug mode
-        """
+  python run.py                     # Start on 0.0.0.0:5001
+  python run.py --host 127.0.0.1   # Localhost only
+  python run.py --port 8080        # Custom port
+  python run.py --reload           # Auto-reload on code changes (dev)
+  python run.py --skip-checks      # Skip pre-flight checks
+        """,
     )
-    
-    parser.add_argument(
-        '--host', 
-        default='0.0.0.0',
-        help='Host to bind to (default: 0.0.0.0)'
-    )
-    
-    parser.add_argument(
-        '--port', 
-        type=int, 
-        default=5000,
-        help='Port to bind to (default: 5000)'
-    )
-    
-    parser.add_argument(
-        '--debug', 
-        action='store_true',
-        help='Enable debug mode'
-    )
-    
-    parser.add_argument(
-        '--skip-checks', 
-        action='store_true',
-        help='Skip dependency and configuration checks'
-    )
-    
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind (default: 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=5001, help="Port to bind (default: 5001)")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload (dev mode)")
+    parser.add_argument("--skip-checks", action="store_true", help="Skip dependency and config checks")
     args = parser.parse_args()
-    
+
     print("🎨 BrandGuard Consolidated Pipeline")
     print("=" * 50)
-    
+
     if not args.skip_checks:
         print("\n🔍 Running pre-flight checks...")
         check_python_version()
-        
         if not check_dependencies():
             sys.exit(1)
-        
+
         print("\n📁 Setting up directories...")
         create_directories()
-        
-        print("\n⚙️ Checking configuration...")
-        check_config_files()
-        
-        print("\n✅ All checks passed!")
-    
-    print("\n🚀 Starting server...")
-    start_server(args.host, args.port, args.debug)
 
-if __name__ == '__main__':
+        print("\n⚙️  Checking configuration...")
+        check_config_files()
+
+        print("\n✅ All checks passed!")
+
+    print("\n🚀 Starting server...")
+    start_server(args.host, args.port, args.reload)
+
+
+if __name__ == "__main__":
     main()
