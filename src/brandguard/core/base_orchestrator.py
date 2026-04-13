@@ -11,6 +11,7 @@ import json
 import cv2
 import numpy as np
 from typing import Dict, Any, Optional, List
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import logging
 
@@ -196,7 +197,7 @@ class BasePipelineOrchestrator:
             model_results: Dict[str, Any] = {}
 
             # ------------------------------------------------------------------
-            # Step 1 — Always run YOLO (fast, objective bboxes)
+            # Steps 1 & 2 — Run YOLO and k-means concurrently (independent tasks)
             # ------------------------------------------------------------------
             logo_options = (analysis_options or {}).get('logo_analysis', {})
             if brand_profile:
@@ -208,12 +209,29 @@ class BasePipelineOrchestrator:
                     logo_options = dict(logo_options)
                     logo_options["min_logo_size"] = logo_rules["min_height_px"]
 
-            yolo_logo_result = self.logo_analyzer.analyze_logos(
-                image.copy(), logo_options,
-                rag_context="",
-                few_shot_examples=[],
-            )
+            color_options = dict((analysis_options or {}).get('color_analysis', {}))
+            if brand_profile:
+                color_rules = brand_profile.get("rules", {}).get("color_rules", {})
+                if color_rules.get("palette") and not color_options.get("primary_colors"):
+                    color_options["primary_colors"] = ",".join(color_rules["palette"])
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future_logo = executor.submit(
+                    self.logo_analyzer.analyze_logos,
+                    image.copy(), logo_options,
+                    rag_context="",
+                    few_shot_examples=[],
+                )
+                future_color = executor.submit(
+                    self.color_analyzer.analyze_colors,
+                    image, color_options,
+                )
+                # Fail fast: .result() re-raises any exception from the worker thread
+                yolo_logo_result = future_logo.result()
+                color_result = future_color.result()
+
             self._log_logo_analysis_terminal(yolo_logo_result)
+            self._log_color_analysis_terminal(color_result)
 
             # Normalise YOLO bboxes for the LLM judge
             yolo_detections: List[Dict] = []
@@ -226,17 +244,6 @@ class BasePipelineOrchestrator:
                     "label": det.get("label") or det.get("class_name", "logo"),
                 })
 
-            # ------------------------------------------------------------------
-            # Step 2 — Always run k-means color extraction (objective pixel data)
-            # ------------------------------------------------------------------
-            color_options = dict((analysis_options or {}).get('color_analysis', {}))
-            if brand_profile:
-                color_rules = brand_profile.get("rules", {}).get("color_rules", {})
-                if color_rules.get("palette") and not color_options.get("primary_colors"):
-                    color_options["primary_colors"] = ",".join(color_rules["palette"])
-
-            color_result = self.color_analyzer.analyze_colors(image, color_options)
-            self._log_color_analysis_terminal(color_result)
             dominant_colors: List[Dict] = color_result.get("dominant_colors") or []
 
             # ------------------------------------------------------------------
