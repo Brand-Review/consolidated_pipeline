@@ -1,0 +1,739 @@
+[
+  {
+    "image": "Graphic 1/Approved.jpg",
+    "expected_verdict": "approved",
+    "predicted_verdict": "approved",
+    "verdict_correct": true,
+    "expected_dims": [],
+    "flagged_dims": [
+      "typography"
+    ],
+    "reasoning_scores": {},
+    "reasoning_quality": 1.0,
+    "latency_s": 41.08,
+    "input_tokens": 4488,
+    "output_tokens": 1262,
+    "total_tokens": 5750,
+    "cost_usd": 0.16197,
+    "overall_score": 0.925,
+    "error": null,
+    "note": ""
+  },
+  {
+    "image": "Graphic 1/Rejected 1.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "logo"
+    ],
+    "flagged_dims": [
+      "typography"
+    ],
+    "reasoning_scores": {
+      "logo": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 23.081,
+    "input_tokens": 4322,
+    "output_tokens": 1084,
+    "total_tokens": 5406,
+    "cost_usd": 0.14613,
+    "overall_score": 0.812,
+    "error": null,
+    "note": "Colorful logo on dark background"
+  },
+  {
+    "image": "Graphic 1/Rejected 2.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "approved",
+    "verdict_correct": false,
+    "expected_dims": [
+      "typography"
+    ],
+    "flagged_dims": [],
+    "reasoning_scores": {
+      "typography": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 23.072,
+    "input_tokens": 4322,
+    "output_tokens": 970,
+    "total_tokens": 5292,
+    "cost_usd": 0.13758,
+    "overall_score": 0.962,
+    "error": null,
+    "note": "Wrong Bangla font"
+  },
+  {
+    "image": "Graphic 1/Rejected 3.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "typography"
+    ],
+    "flagged_dims": [
+      "typography"
+    ],
+    "reasoning_scores": {
+      "typography": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 26.777,
+    "input_tokens": 4569,
+    "output_tokens": 1306,
+    "total_tokens": 5875,
+    "cost_usd": 0.166485,
+    "overall_score": 0.7,
+    "error": null,
+    "note": "Wrong English font"
+  },
+  {
+    "image": "Graphic 1/Rejected 4.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "color"
+    ],
+    "flagged_dims": [
+      "typography"
+    ],
+    "reasoning_scores": {
+      "color": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 28.941,
+    "input_tokens": 4648,
+    "output_tokens": 1410,
+    "total_tokens": 6058,
+    "cost_usd": 0.17547,
+    "overall_score": 0.738,
+    "error": null,
+    "note": "Wrong brand color"
+  },
+  {
+    "image": "Graphic 1/Rejected 5.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "typography",
+      "logo",
+      "color"
+    ],
+    "flagged_dims": [
+      "color",
+      "typography"
+    ],
+    "reasoning_scores": {
+      "typography": 1,
+      "logo": 1,
+      "color": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 30.333,
+    "input_tokens": 4645,
+    "output_tokens": 1380,
+    "total_tokens": 6025,
+    "cost_usd": 0.173175,
+    "overall_score": 0.688,
+    "error": null,
+    "note": "Wrong fonts, colorful logo on dark, wrong color"
+  },
+  {
+    "image": "Graphic 2/Approved.jpg",
+    "expected_verdict": "approved",
+    "predicted_verdict": "rejected",
+    "verdict_correct": false,
+    "expected_dims": [],
+    "flagged_dims": [
+      "color",
+      "typography",
+      "copywriting"
+    ],
+    "reasoning_scores": {},
+    "reasoning_quality": 1.0,
+    "latency_s": 33.024,
+    "input_tokens": 4406,
+    "output_tokens": 1055,
+    "total_tokens": 5461,
+    "cost_usd": 0.145215,
+    "overall_score": 0.625,
+    "error": null,
+    "note": ""
+  },
+  {
+    "image": "Graphic 2/Rejected 1.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "typography"
+    ],
+    "flagged_dims": [
+      "typography"
+    ],
+    "reasoning_scores": {
+      "typography": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 33.02,
+    "input_tokens": 4403,
+    "output_tokens": 1044,
+    "total_tokens": 5447,
+    "cost_usd": 0.144345,
+    "overall_score": 0.725,
+    "error": null,
+    "note": "Wrong English font"
+  },
+  {
+    "image": "Graphic 2/Rejected 2.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "color"
+    ],
+    "flagged_dims": [
+      "color",
+      "logo",
+      "typography"
+    ],
+    "reasoning_scores": {
+      "color": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 34.94,
+    "input_tokens": 4407,
+    "output_tokens": 1114,
+    "total_tokens": 5521,
+    "cost_usd": 0.149655,
+    "overall_score": 0.6,
+    "error": null,
+    "note": "Wrong brand color"
+  },
+  {
+    "image": "Graphic 2/Rejected 3.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "logo"
+    ],
+    "flagged_dims": [
+      "color",
+      "logo",
+      "copywriting"
+    ],
+    "reasoning_scores": {
+      "logo": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 30.213,
+    "input_tokens": 4488,
+    "output_tokens": 1169,
+    "total_tokens": 5657,
+    "cost_usd": 0.154995,
+    "overall_score": 0.675,
+    "error": null,
+    "note": "Wrong logo placement"
+  },
+  {
+    "image": "Graphic 2/Rejected 4.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "logo"
+    ],
+    "flagged_dims": [
+      "typography",
+      "copywriting"
+    ],
+    "reasoning_scores": {
+      "logo": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 34.444,
+    "input_tokens": 4323,
+    "output_tokens": 1027,
+    "total_tokens": 5350,
+    "cost_usd": 0.14187,
+    "overall_score": 0.787,
+    "error": null,
+    "note": "Wrong logo size"
+  },
+  {
+    "image": "Graphic 2/Rejected 5.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "logo"
+    ],
+    "flagged_dims": [
+      "typography",
+      "copywriting"
+    ],
+    "reasoning_scores": {
+      "logo": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 34.048,
+    "input_tokens": 4489,
+    "output_tokens": 1152,
+    "total_tokens": 5641,
+    "cost_usd": 0.153735,
+    "overall_score": 0.838,
+    "error": null,
+    "note": "Wrong logo color"
+  },
+  {
+    "image": "Graphic 3/Approved.jpg",
+    "expected_verdict": "approved",
+    "predicted_verdict": "rejected",
+    "verdict_correct": false,
+    "expected_dims": [],
+    "flagged_dims": [
+      "typography"
+    ],
+    "reasoning_scores": {},
+    "reasoning_quality": 1.0,
+    "latency_s": 21.42,
+    "input_tokens": 4929,
+    "output_tokens": 1394,
+    "total_tokens": 6323,
+    "cost_usd": 0.178485,
+    "overall_score": 0.725,
+    "error": null,
+    "note": ""
+  },
+  {
+    "image": "Graphic 3/Rejected 1.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "approved",
+    "verdict_correct": false,
+    "expected_dims": [
+      "typography"
+    ],
+    "flagged_dims": [],
+    "reasoning_scores": {
+      "typography": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 20.49,
+    "input_tokens": 4923,
+    "output_tokens": 1461,
+    "total_tokens": 6384,
+    "cost_usd": 0.18342,
+    "overall_score": 0.925,
+    "error": null,
+    "note": "Wrong English font"
+  },
+  {
+    "image": "Graphic 3/Rejected 2.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "approved",
+    "verdict_correct": false,
+    "expected_dims": [
+      "color",
+      "typography"
+    ],
+    "flagged_dims": [],
+    "reasoning_scores": {
+      "color": 1,
+      "typography": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 25.313,
+    "input_tokens": 4842,
+    "output_tokens": 1305,
+    "total_tokens": 6147,
+    "cost_usd": 0.170505,
+    "overall_score": 0.962,
+    "error": null,
+    "note": "Wrong brand color, wrong Bangla+English font"
+  },
+  {
+    "image": "Graphic 3/Rejected 3.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "typography"
+    ],
+    "flagged_dims": [
+      "color",
+      "typography"
+    ],
+    "reasoning_scores": {
+      "typography": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 27.593,
+    "input_tokens": 5245,
+    "output_tokens": 1877,
+    "total_tokens": 7122,
+    "cost_usd": 0.21945,
+    "overall_score": 0.65,
+    "error": null,
+    "note": "Wrong font size, wrong background"
+  },
+  {
+    "image": "Graphic 3/Rejected 4.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "logo",
+      "typography"
+    ],
+    "flagged_dims": [
+      "logo",
+      "typography"
+    ],
+    "reasoning_scores": {
+      "logo": 1,
+      "typography": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 25.894,
+    "input_tokens": 5080,
+    "output_tokens": 1735,
+    "total_tokens": 6815,
+    "cost_usd": 0.206325,
+    "overall_score": 0.588,
+    "error": null,
+    "note": "Wrong logo placement, wrong Bangla font"
+  },
+  {
+    "image": "Graphic 3/Rejected 5.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "color",
+      "typography",
+      "logo"
+    ],
+    "flagged_dims": [
+      "color",
+      "logo",
+      "typography",
+      "copywriting"
+    ],
+    "reasoning_scores": {
+      "color": 1,
+      "typography": 1,
+      "logo": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 25.378,
+    "input_tokens": 5406,
+    "output_tokens": 2194,
+    "total_tokens": 7600,
+    "cost_usd": 0.24564,
+    "overall_score": 0.5,
+    "error": null,
+    "note": "Wrong color, wrong fonts, wrong logo size"
+  },
+  {
+    "image": "Graphic 4/Approved.jpg",
+    "expected_verdict": "approved",
+    "predicted_verdict": "rejected",
+    "verdict_correct": false,
+    "expected_dims": [],
+    "flagged_dims": [
+      "logo",
+      "typography",
+      "copywriting"
+    ],
+    "reasoning_scores": {},
+    "reasoning_quality": 1.0,
+    "latency_s": 20.993,
+    "input_tokens": 4400,
+    "output_tokens": 1377,
+    "total_tokens": 5777,
+    "cost_usd": 0.169275,
+    "overall_score": 0.688,
+    "error": null,
+    "note": ""
+  },
+  {
+    "image": "Graphic 4/Rejected 1.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "logo"
+    ],
+    "flagged_dims": [
+      "color",
+      "logo",
+      "copywriting"
+    ],
+    "reasoning_scores": {
+      "logo": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 20.785,
+    "input_tokens": 4320,
+    "output_tokens": 1387,
+    "total_tokens": 5707,
+    "cost_usd": 0.168825,
+    "overall_score": 0.675,
+    "error": null,
+    "note": "Wrong logo position"
+  },
+  {
+    "image": "Graphic 4/Rejected 2.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "approved",
+    "verdict_correct": false,
+    "expected_dims": [
+      "typography"
+    ],
+    "flagged_dims": [],
+    "reasoning_scores": {
+      "typography": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 21.087,
+    "input_tokens": 4482,
+    "output_tokens": 1366,
+    "total_tokens": 5848,
+    "cost_usd": 0.16968,
+    "overall_score": 0.925,
+    "error": null,
+    "note": "Wrong Bangla font"
+  },
+  {
+    "image": "Graphic 4/Rejected 3.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "color"
+    ],
+    "flagged_dims": [
+      "color"
+    ],
+    "reasoning_scores": {
+      "color": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 25.214,
+    "input_tokens": 4481,
+    "output_tokens": 1282,
+    "total_tokens": 5763,
+    "cost_usd": 0.163365,
+    "overall_score": 0.837,
+    "error": null,
+    "note": "Wrong background color"
+  },
+  {
+    "image": "Graphic 4/Rejected 4.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "logo"
+    ],
+    "flagged_dims": [
+      "typography",
+      "copywriting"
+    ],
+    "reasoning_scores": {
+      "logo": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 20.467,
+    "input_tokens": 4487,
+    "output_tokens": 1458,
+    "total_tokens": 5945,
+    "cost_usd": 0.176655,
+    "overall_score": 0.738,
+    "error": null,
+    "note": "Wrong logo size"
+  },
+  {
+    "image": "Graphic 4/Rejected 5.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "logo",
+      "color"
+    ],
+    "flagged_dims": [
+      "color",
+      "logo",
+      "typography",
+      "copywriting"
+    ],
+    "reasoning_scores": {
+      "logo": 1,
+      "color": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 20.419,
+    "input_tokens": 4489,
+    "output_tokens": 1650,
+    "total_tokens": 6139,
+    "cost_usd": 0.191085,
+    "overall_score": 0.475,
+    "error": null,
+    "note": "Wrong logo color, wrong brand color"
+  },
+  {
+    "image": "Graphic 5/Approved.jpg",
+    "expected_verdict": "approved",
+    "predicted_verdict": "rejected",
+    "verdict_correct": false,
+    "expected_dims": [],
+    "flagged_dims": [
+      "typography"
+    ],
+    "reasoning_scores": {},
+    "reasoning_quality": 1.0,
+    "latency_s": 20.492,
+    "input_tokens": 4563,
+    "output_tokens": 1341,
+    "total_tokens": 5904,
+    "cost_usd": 0.16902,
+    "overall_score": 0.837,
+    "error": null,
+    "note": ""
+  },
+  {
+    "image": "Graphic 5/Rejected 1.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "typography"
+    ],
+    "flagged_dims": [
+      "color",
+      "typography"
+    ],
+    "reasoning_scores": {
+      "typography": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 18.84,
+    "input_tokens": 4404,
+    "output_tokens": 1018,
+    "total_tokens": 5422,
+    "cost_usd": 0.14241,
+    "overall_score": 0.85,
+    "error": null,
+    "note": "Wrong English font"
+  },
+  {
+    "image": "Graphic 5/Rejected 2.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "logo"
+    ],
+    "flagged_dims": [
+      "logo",
+      "typography"
+    ],
+    "reasoning_scores": {
+      "logo": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 22.131,
+    "input_tokens": 4321,
+    "output_tokens": 1051,
+    "total_tokens": 5372,
+    "cost_usd": 0.14364,
+    "overall_score": 0.712,
+    "error": null,
+    "note": "Wrong logo position"
+  },
+  {
+    "image": "Graphic 5/Rejected 3.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "color"
+    ],
+    "flagged_dims": [
+      "typography"
+    ],
+    "reasoning_scores": {
+      "color": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 22.415,
+    "input_tokens": 4564,
+    "output_tokens": 1254,
+    "total_tokens": 5818,
+    "cost_usd": 0.16251,
+    "overall_score": 0.863,
+    "error": null,
+    "note": "Wrong brand color"
+  },
+  {
+    "image": "Graphic 5/Rejected 4.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "color",
+      "typography"
+    ],
+    "flagged_dims": [
+      "color",
+      "logo"
+    ],
+    "reasoning_scores": {
+      "color": 1,
+      "typography": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 20.911,
+    "input_tokens": 4652,
+    "output_tokens": 1350,
+    "total_tokens": 6002,
+    "cost_usd": 0.17103,
+    "overall_score": 0.812,
+    "error": null,
+    "note": "Wrong brand color, wrong font"
+  },
+  {
+    "image": "Graphic 5/Rejected 5.jpg",
+    "expected_verdict": "rejected",
+    "predicted_verdict": "rejected",
+    "verdict_correct": true,
+    "expected_dims": [
+      "color",
+      "logo"
+    ],
+    "flagged_dims": [
+      "color",
+      "logo",
+      "typography"
+    ],
+    "reasoning_scores": {
+      "color": 1,
+      "logo": 1
+    },
+    "reasoning_quality": 1.0,
+    "latency_s": 26.834,
+    "input_tokens": 4404,
+    "output_tokens": 1134,
+    "total_tokens": 5538,
+    "cost_usd": 0.15111,
+    "overall_score": 0.713,
+    "error": null,
+    "note": "Wrong background color, wrong logo color"
+  }
+]
