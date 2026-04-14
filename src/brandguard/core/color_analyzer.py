@@ -167,14 +167,30 @@ class ColorAnalyzer:
                 'secondary': [],
                 'accent': []
             }
-            
+            non_compliant_indices = set()
+
             # Get thresholds for each category
             primary_threshold = brand_colors.get('primary_threshold', 75) / 100.0
             secondary_threshold = brand_colors.get('secondary_threshold', 75) / 100.0
             accent_threshold = brand_colors.get('accent_threshold', 75) / 100.0
 
-            
-            for color_info in extracted_colors:
+            # Thresholds for identifying significant off-palette violations
+            OFFPALETTE_SALIENCY_THRESHOLD = brand_colors.get('offpalette_saliency_threshold', 0.5)
+            OFFPALETTE_AREA_THRESHOLD = brand_colors.get('offpalette_area_threshold', 1.0)
+
+            # Colors below this saliency are neutral backgrounds (white canvas,
+            # light gray illustration areas, subtle shadows) and should be excluded
+            # from brand palette validation entirely. Brand rules apply to intentional
+            # design choices, not ambient background fill.
+            VALIDATION_MIN_SALIENCY = brand_colors.get('validation_min_saliency', 0.30)
+
+            excluded_neutral_colors = []
+
+            for idx, color_info in enumerate(extracted_colors):
+                # Skip neutral/background colors — they are canvas, not brand elements
+                if color_info.get('saliencyWeight', 1.0) < VALIDATION_MIN_SALIENCY:
+                    excluded_neutral_colors.append(color_info)
+                    continue
                 extracted_rgb = color_info['rgb']
                 is_compliant = False
                 match_category = None
@@ -223,16 +239,50 @@ class ColorAnalyzer:
                     })
                 else:
                     non_compliant_colors.append(color_info)
-            
-            compliance_score = compliant_count / len(extracted_colors) if extracted_colors else 0
-            
+                    non_compliant_indices.add(idx)
+
+            # Saliency × area weighted compliance score.
+            # Neutrals (excluded above) are not part of the denominator — the score
+            # reflects only intentional, visually prominent brand element colors.
+            validated_colors = [
+                c for i, c in enumerate(extracted_colors)
+                if c not in excluded_neutral_colors
+            ]
+            weighted_compliant = sum(
+                c.get('percentage', 0) * c.get('saliencyWeight', 1.0)
+                for i, c in enumerate(extracted_colors)
+                if i not in non_compliant_indices and c not in excluded_neutral_colors
+            )
+            weighted_total = sum(
+                c.get('percentage', 0) * c.get('saliencyWeight', 1.0)
+                for c in validated_colors
+            )
+            compliance_score = weighted_compliant / weighted_total if weighted_total > 0 else 0.0
+
+            # Identify off-palette colors that are both visually prominent (high
+            # saliency) and occupy meaningful image area — these represent clear
+            # brand violations (e.g. wrong-color icons, buttons, highlights).
+            significant_violations = [
+                extracted_colors[i] for i in non_compliant_indices
+                if extracted_colors[i].get('saliencyWeight', 0) >= OFFPALETTE_SALIENCY_THRESHOLD
+                and extracted_colors[i].get('percentage', 0) >= OFFPALETTE_AREA_THRESHOLD
+            ]
+
+            # Hard cap: any significant violation must drive the score below the
+            # critical-dimension threshold (0.65) so the verdict logic rejects it,
+            # even when the majority of image area uses brand-compliant colors.
+            if significant_violations:
+                compliance_score = min(compliance_score, 0.60)
+
             return {
                 'compliance_score': round(compliance_score, 3),
                 'compliant_colors': len(compliant_colors),
                 'non_compliant_colors': len(non_compliant_colors),
+                'excluded_neutral_colors': excluded_neutral_colors,
                 'total_colors': len(extracted_colors),
                 'compliant_colors_list': compliant_colors,
                 'non_compliant_colors_list': non_compliant_colors,
+                'significant_off_palette_violations': significant_violations,
                 'category_matches': category_matches,
                 'thresholds': {
                     'primary': primary_threshold,

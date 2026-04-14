@@ -39,7 +39,15 @@ user_template: |
   4. Extract ALL visible text from the image (extracted_text).
   5. For each distinct text region, identify the font family, style, and approximate size (detected_fonts).
   6. Score compliance 0.0–1.0 for each dimension against the brand guidelines:
-     - color: how well dominant colors match the brand palette
+     - color: how well intentional brand element colors match the brand palette.
+       EXCLUDE from evaluation: white/near-white canvas areas, light gray illustration
+       backgrounds, and any low-saliency neutral fills — these are design canvas, not
+       brand color choices, and must NOT reduce the color score.
+       INCLUDE in evaluation: filled shapes, icons, text backgrounds, accent colors,
+       gradient fills, and any visually prominent colored elements.
+       IMPORTANT: if any off-palette color appears on prominent UI elements (icons,
+       buttons, highlights, decorative shapes) with meaningful visual presence, the
+       score MUST be below 0.65 regardless of how well other elements comply.
      - logo: placement, size, visibility, and brand identity compliance
      - typography: whether fonts match brand-approved fonts
      - copywriting: tone, voice, grammar, and messaging compliance

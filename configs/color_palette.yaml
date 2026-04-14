@@ -35,12 +35,26 @@ brand_color_validation:
   primary_threshold: 75
   secondary_threshold: 75
   accent_threshold: 75
-  
+
   # CIEDE2000 color difference tolerance
   color_tolerance: 7.0
-  
+
   # Enable category-based validation
   enable_category_validation: true
-  
+
   # Enable similarity scoring
   enable_similarity_scoring: true
+
+  # Off-palette significance thresholds for hard violation detection.
+  # A color is a "significant violation" when BOTH conditions are met:
+  #   saliency >= offpalette_saliency_threshold  (visually prominent)
+  #   area     >= offpalette_area_threshold (%)  (occupies meaningful image area)
+  # When any such color is found, the compliance score is capped at 0.60
+  # so the verdict hard-floor (0.65) forces a rejection.
+  offpalette_saliency_threshold: 0.5
+  offpalette_area_threshold: 1.0
+
+  # Colors with saliency below this value are treated as neutral backgrounds
+  # (white canvas, light gray areas, subtle shadows) and excluded from brand
+  # palette validation. Only intentional, visually prominent colors are evaluated.
+  validation_min_saliency: 0.30

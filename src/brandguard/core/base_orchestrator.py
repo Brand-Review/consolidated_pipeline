@@ -308,14 +308,29 @@ class BasePipelineOrchestrator:
                         },
                     }
 
-                    # Color analysis enriched with LLM verification
+                    # Color analysis enriched with LLM verification.
+                    # If k-means found significant off-palette violations, the LLM
+                    # score must not override upward — take the minimum so that the
+                    # hard-floor rejection logic in _generate_verdict fires correctly.
                     color_verification = judge_verdict.get("color_verification", {})
+                    kmeans_bv = color_result.get("brand_validation", {})
+                    kmeans_color_score = float(kmeans_bv.get("compliance_score", 0.0))
+                    llm_color_score = float(judge_verdict.get("color", {}).get("score", 0.0))
+                    has_color_violations = bool(kmeans_bv.get("significant_off_palette_violations"))
+                    if has_color_violations:
+                        # Wrong brand colors on prominent elements — k-means caps the LLM upward.
+                        final_color_score = min(llm_color_score, kmeans_color_score)
+                    else:
+                        # No significant violations — k-means floors the LLM downward.
+                        # This prevents the LLM from penalising neutral backgrounds (white
+                        # canvas, light gray areas) that k-means correctly excludes.
+                        final_color_score = max(llm_color_score, kmeans_color_score)
                     model_results['color_analysis'] = {
                         **color_result,
                         "color_verification": color_verification,
                         "brand_validation": {
-                            **color_result.get("brand_validation", {}),
-                            "compliance_score": judge_verdict.get("color", {}).get("score", 0.0),
+                            **kmeans_bv,
+                            "compliance_score": round(final_color_score, 3),
                             "reason": judge_verdict.get("color", {}).get("reason", ""),
                         },
                     }
@@ -525,10 +540,22 @@ class BasePipelineOrchestrator:
 
             # Extract per-dimension scores
             def _color_score() -> float:
-                if judge_verdict:
-                    return float(judge_verdict.get('color', {}).get('score', 0))
                 ca = model_results.get('color_analysis', {})
-                return float(ca.get('brand_validation', {}).get('compliance_score', 0))
+                bv = ca.get('brand_validation', {})
+                # compliance_score already stores the clamped k-means value
+                # (set in _analyze_image after applying violation cap / neutral exclusion).
+                kmeans_score = float(bv.get('compliance_score', 0))
+                if judge_verdict:
+                    llm_score = float(judge_verdict.get('color', {}).get('score', 0))
+                    has_violations = bool(bv.get('significant_off_palette_violations'))
+                    if has_violations:
+                        # Wrong brand colors detected — cap the LLM score to k-means.
+                        return min(llm_score, kmeans_score)
+                    else:
+                        # No violations — floor the LLM score to k-means so the LLM
+                        # cannot penalise neutral backgrounds that k-means excluded.
+                        return max(llm_score, kmeans_score)
+                return kmeans_score
 
             def _logo_score() -> float:
                 if judge_verdict:

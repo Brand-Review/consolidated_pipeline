@@ -31,6 +31,11 @@ models:
     primary_threshold: 75
     secondary_threshold: 75
     accent_threshold: 75
+    # Off-palette significance thresholds — see color_palette.yaml for details.
+    offpalette_saliency_threshold: 0.5
+    offpalette_area_threshold: 1.0
+    # Minimum saliency for a color to be included in brand palette validation.
+    validation_min_saliency: 0.30
   
   # Typography Analysis Configuration
   typography:
