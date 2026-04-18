@@ -35,8 +35,15 @@ _DEFAULT_MODEL = "openai/gpt-5.1"
 # To switch versions: set PROMPT_VERSION_BRAND_COMPLIANCE_JUDGE=v2
 _PROMPT = _prompt_registry.get("brand_compliance_judge")
 _SYSTEM_PROMPT = _PROMPT.system
-_USER_PROMPT_TEMPLATE = _PROMPT.user_template
+_USER_PROMPT_TEMPLATE_STATIC = _PROMPT.extras.get("user_template_static", "")
+_USER_PROMPT_TEMPLATE_DYNAMIC = _PROMPT.extras.get("user_template_dynamic", "")
 _VERDICT_TASK_ADDENDUM = _PROMPT.extras.get("verdict_addendum", "")
+
+
+def _is_anthropic_model(model: str) -> bool:
+    """Return True when the model routes through Anthropic, enabling cache_control blocks."""
+    m = model.lower()
+    return "anthropic/" in m or m.startswith("claude")
 
 
 class BrandComplianceJudge:
@@ -210,14 +217,27 @@ class BrandComplianceJudge:
         few_shot_examples: List[Dict],
         verdict_mode: str = 'threshold',
     ) -> List[Dict]:
-        messages: List[Dict] = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        use_cache = _is_anthropic_model(self.model)
 
-        # Few-shot turns (approved first, then rejected)
+        # System message — wrap in a content block for Anthropic cache_control
+        if use_cache:
+            system_msg: Dict[str, Any] = {
+                "role": "system",
+                "content": [{"type": "text", "text": _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral" , "ttl": "1h"}}],
+            }
+        else:
+            system_msg = {"role": "system", "content": _SYSTEM_PROMPT}
+        messages: List[Dict] = [system_msg]
+
+        # Few-shot turns (approved first, then rejected).
+        # Track user-message indices so we can mark the last one for caching.
         approved = [e for e in few_shot_examples if e.get("label") == "approved"]
         rejected = [e for e in few_shot_examples if e.get("label") == "rejected"]
+        few_shot_user_indices: List[int] = []
 
         for ex in approved[:2]:
             if ex.get("image_b64"):
+                few_shot_user_indices.append(len(messages))
                 messages.append({
                     "role": "user",
                     "content": [
@@ -237,6 +257,7 @@ class BrandComplianceJudge:
             if ex.get("image_b64"):
                 reasons = ex.get("rejection_reasons", [])
                 reasons_text = "; ".join(reasons) if reasons else "Does not meet brand standards"
+                few_shot_user_indices.append(len(messages))
                 messages.append({
                     "role": "user",
                     "content": [
@@ -252,26 +273,41 @@ class BrandComplianceJudge:
                     "content": f'{{"note": "This asset is rejected. Reasons: {reasons_text}."}}',
                 })
 
-        # Main analysis turn
-        base_prompt = _USER_PROMPT_TEMPLATE.format(
+        # Cache breakpoint 2: mark last content block of last few-shot user message
+        if use_cache and few_shot_user_indices:
+            last_idx = few_shot_user_indices[-1]
+            messages[last_idx]["content"][-1]["cache_control"] = {"type": "ephemeral","ttl": "1h"}
+
+        # Strip internal-only fields from dominant_colors before serialization —
+        # rgb is redundant with hex; cluster_id is an internal bookkeeping index.
+        stripped_colors = [
+            {k: c[k] for k in ("hex", "percentage", "saliency_weight") if k in c}
+            for c in dominant_colors
+        ]
+
+        static_text = _USER_PROMPT_TEMPLATE_STATIC.format(
             brand_rules=self._format_brand_rules(brand_rules),
             brand_context=brand_context,
-            logo_detections_json=json.dumps(logo_detections, indent=2) if logo_detections else "[]",
-            dominant_colors_json=json.dumps(dominant_colors, indent=2) if dominant_colors else "[]",
         )
-        # In llm mode, ask the LLM to also provide an explicit verdict + verdict_reason
+        dynamic_text = _USER_PROMPT_TEMPLATE_DYNAMIC.format(
+            logo_detections_json=json.dumps(logo_detections, indent=2) if logo_detections else "[]",
+            dominant_colors_json=json.dumps(stripped_colors, indent=2) if stripped_colors else "[]",
+        )
         if verdict_mode == 'llm':
-            base_prompt = base_prompt + _VERDICT_TASK_ADDENDUM
+            dynamic_text = dynamic_text + _VERDICT_TASK_ADDENDUM
 
-        user_content = [
-            {
-                "type": "text",
-                "text": base_prompt,
-            },
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:{media_type};base64,{image_b64}"},
-            },
-        ]
+        if use_cache:
+            # Cache breakpoint 3: brand rules + context are static per brand → cacheable
+            user_content: List[Dict] = [
+                {"type": "text", "text": static_text, "cache_control": {"type": "ephemeral" , "ttl": "1h"}},
+                {"type": "text", "text": dynamic_text},
+                {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{image_b64}"}},
+            ]
+        else:
+            user_content = [
+                {"type": "text", "text": static_text + "\n\n" + dynamic_text},
+                {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{image_b64}"}},
+            ]
+
         messages.append({"role": "user", "content": user_content})
         return messages

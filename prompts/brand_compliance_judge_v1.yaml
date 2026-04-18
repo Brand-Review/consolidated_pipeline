@@ -18,95 +18,53 @@ system: |
   Your job: review the image thoroughly and return a single JSON object.
   Return JSON ONLY — no markdown, no explanation.
 
-user_template: |
+# Static part — contains only per-brand content (cacheable for Anthropic models)
+user_template_static: |
   ## Brand Rules (authoritative — score strictly against these)
   {brand_rules}
 
   ## Brand Guidelines (training examples)
   {brand_context}
 
+# Dynamic part — contains per-image data, tasks, and output schema
+user_template_dynamic: |
   ## YOLO Logo Detections (verify each; add any logos YOLO missed)
   {logo_detections_json}
 
-  ## k-means Dominant Colors (verify accuracy)
+  ## k-means Dominant Colors (hex, percentage, saliency_weight)
   {dominant_colors_json}
 
   ## Tasks
-  1. For each YOLO detection: confirm whether it is a real logo (source: "yolo").
-     If a bbox is NOT a logo, set is_logo=false and explain why.
-  2. Detect any logos YOLO missed and add them as source: "llm" entries.
+  1. Verify each YOLO detection (source:"yolo"): is it a real logo? If not, set is_logo=false and explain.
+  2. Detect logos YOLO missed; add as source:"llm" entries.
   3. Confirm or correct the dominant color palette (color_verification).
-  4. Extract ALL visible text from the image (extracted_text).
-  5. For each distinct text region, identify the font family, style, and approximate size (detected_fonts).
-  6. Score compliance 0.0–1.0 for each dimension against the brand guidelines:
-     - color: how well intentional brand element colors match the brand palette.
-       EXCLUDE from evaluation: white/near-white canvas areas, light gray illustration
-       backgrounds, and any low-saliency neutral fills — these are design canvas, not
-       brand color choices, and must NOT reduce the color score.
-       INCLUDE in evaluation: filled shapes, icons, text backgrounds, accent colors,
-       gradient fills, and any visually prominent colored elements.
-       IMPORTANT: if any off-palette color appears on prominent UI elements (icons,
-       buttons, highlights, decorative shapes) with meaningful visual presence, the
-       score MUST be below 0.65 regardless of how well other elements comply.
-     - logo: placement, size, visibility, and brand identity compliance
-     - typography: whether fonts match brand-approved fonts
-     - copywriting: tone, voice, grammar, and messaging compliance
-  7. Detect any grammar, spelling, or punctuation errors in the extracted text.
-     For each error: quote the incorrect text, state the error type, and provide the corrected version.
-     If no errors are found, return an empty errors list with a positive summary.
-  8. Assess the brand tone/voice:
-     - Identify the detected tone (e.g. professional, casual, warm, motivational, formal, urgent, etc.)
-     - State whether it matches the brand's voice rules (from Brand Rules above)
-     - Give a one-sentence assessment comparing detected tone to brand guidelines
+  4. Extract ALL visible text (extracted_text).
+  5. For each text region: identify font family, style, approximate size (detected_fonts).
+  6. Score 0.0–1.0 for each dimension:
+     - color: match of intentional brand elements to palette. Exclude canvas/neutral backgrounds; include shapes, icons, accents, gradients. Score MUST be <0.65 if any off-palette color has meaningful visual presence on prominent elements.
+     - logo: placement, size, visibility, brand identity.
+     - typography: fonts match brand-approved fonts.
+     - copywriting: tone, voice, grammar, messaging.
+  7. Detect grammar/spelling/punctuation errors (grammar_analysis). Empty errors list if none found.
+  8. Assess brand tone/voice vs. brand voice rules (tone_analysis).
 
-  Return a JSON object with EXACTLY this structure:
+  Return ONLY this JSON (no markdown):
   {{
-    "extracted_text": "<all visible text, newline-separated>",
-    "detected_fonts": [
-      {{"family": "<font name>", "region": "<headline|body|tagline|other>", "size_approx": <number>, "style": "<regular|bold|italic>"}}
-    ],
-    "logo_judgements": [
-      {{
-        "source": "yolo",
-        "detection_id": <int>,
-        "bbox": [x1, y1, x2, y2],
-        "is_logo": <true|false>,
-        "brand_identified": "<brand name or null>",
-        "confidence_ok": <true|false>,
-        "placement_zone": "<top-left|top-right|bottom-left|bottom-right|center|other>",
-        "reason": "<only when is_logo=false>"
-      }}
-    ],
-    "color_verification": {{
-      "accurate": <true|false>,
-      "corrected_palette": ["#hex", "..."],
-      "notes": "<brief note>"
-    }},
-    "color":       {{"score": <0.0-1.0>, "reason": "<one sentence>"}},
-    "logo":        {{"score": <0.0-1.0>, "reason": "<one sentence>"}},
-    "typography":  {{"score": <0.0-1.0>, "reason": "<one sentence>"}},
-    "copywriting": {{"score": <0.0-1.0>, "reason": "<one sentence>"}},
-    "grammar_analysis": {{
-      "errors": [
-        {{"text": "<incorrect text>", "error_type": "<spelling|grammar|punctuation>", "suggestion": "<corrected text>"}}
-      ],
-      "error_count": <int>,
-      "summary": "<one sentence overall grammar assessment>"
-    }},
-    "tone_analysis": {{
-      "detected_tone": "<professional|casual|formal|warm|motivational|urgent|other>",
-      "on_brand": <true|false>,
-      "assessment": "<one sentence comparing detected tone to brand voice rules>"
-    }}
+    "extracted_text": "string",
+    "detected_fonts": [{{"family": "string", "region": "headline|body|tagline|other", "size_approx": 0, "style": "regular|bold|italic"}}],
+    "logo_judgements": [{{"source": "yolo|llm", "detection_id": 0, "bbox": [0,0,0,0], "is_logo": true, "brand_identified": "string|null", "confidence_ok": true, "placement_zone": "top-left|top-right|bottom-left|bottom-right|center|other", "reason": "string (only when is_logo=false)"}}],
+    "color_verification": {{"accurate": true, "corrected_palette": ["#hex"], "notes": "string"}},
+    "color":       {{"score": 0.0, "reason": "string"}},
+    "logo":        {{"score": 0.0, "reason": "string"}},
+    "typography":  {{"score": 0.0, "reason": "string"}},
+    "copywriting": {{"score": 0.0, "reason": "string"}},
+    "grammar_analysis": {{"errors": [{{"text": "string", "error_type": "spelling|grammar|punctuation", "suggestion": "string"}}], "error_count": 0, "summary": "string"}},
+    "tone_analysis": {{"detected_tone": "professional|casual|warm|motivational|formal|urgent|other", "on_brand": true, "assessment": "string"}}
   }}
 
-# Appended to user_template only when verdict_mode == 'llm'
+# Appended to user_template_dynamic only when verdict_mode == 'llm'
 verdict_addendum: |
-  7. Based on ALL dimensions above, give a final explicit verdict:
-     - "approved": the asset meets brand standards overall
-     - "rejected": the asset fails brand standards and should not be used
-     In one sentence, explain the primary reason for your decision.
-
-  Add these fields to the JSON response above:
-    "verdict": "approved" | "rejected",
-    "verdict_reason": "<one sentence primary justification for the verdict>"
+  Also provide an explicit verdict:
+  - "approved": the asset meets brand standards overall
+  - "rejected": the asset fails brand standards and should not be used
+  Add to the JSON: "verdict": "approved"|"rejected", "verdict_reason": "one sentence"

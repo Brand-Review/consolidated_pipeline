@@ -254,10 +254,12 @@ class BasePipelineOrchestrator:
                 brand_context_parts: List[str] = []
                 few_shot_examples: List[Dict] = []
 
+                seen_chunks: set = set()
                 for check_type in ("color", "typography", "logo", "copywriting"):
                     try:
-                        chunk = self.text_rag.retrieve(brand_id, check_type, top_k=3)
-                        if chunk:
+                        chunk = self.text_rag.retrieve(brand_id, check_type, top_k=2)
+                        if chunk and chunk not in seen_chunks:
+                            seen_chunks.add(chunk)
                             brand_context_parts.append(f"### {check_type.title()} Guidelines\n{chunk}")
                     except Exception as e:
                         logger.warning(f"RAG retrieval failed for {check_type}: {e}")
