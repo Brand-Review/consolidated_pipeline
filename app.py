@@ -54,9 +54,16 @@ from werkzeug.utils import secure_filename
 
 from src.brandguard.brand_profile.asset_rag import AssetRAG
 from src.brandguard.brand_profile.brand_store import BrandStore
+from src.brandguard.brand_profile.document_store import DocumentStore
+from src.brandguard.brand_profile.loaders import load_document
+from src.brandguard.brand_profile.chunkers import get_chunker
 from src.brandguard.brand_profile.pdf_extractor import PDFRuleExtractor
+from src.brandguard.brand_profile.rag_config import apply_overrides, load_rag_config
+from src.brandguard.brand_profile.s3_client import S3Client
 from src.brandguard.brand_profile.text_rag import TextRAG
+from src.brandguard.brand_profile.generation import GroundedRAGPipeline
 from src.brandguard.config.settings import Settings
+from src.brandguard.core.llm_client import LLMClient
 from src.brandguard.core.pipeline_orchestrator_new import PipelineOrchestrator
 
 # ---------------------------------------------------------------------------
@@ -96,9 +103,19 @@ if settings:
 
 # Brand profile services (lazy, shared across requests)
 brand_store = BrandStore()
+document_store = DocumentStore()
 text_rag = TextRAG()
 asset_rag = AssetRAG()
 pdf_extractor = PDFRuleExtractor()
+s3_client = S3Client()
+
+# Grounded RAG pipeline (Phase 3) — shared LLM client, built once per process.
+grounded_rag_pipeline: Optional[GroundedRAGPipeline] = None
+try:
+    grounded_rag_pipeline = GroundedRAGPipeline(text_rag=text_rag, llm=LLMClient())
+    logger.info("GroundedRAGPipeline initialized successfully")
+except Exception as e:  # pragma: no cover — defensive; /ask will 503 if None
+    logger.error("Failed to initialize GroundedRAGPipeline: %s", e)
 
 # ---------------------------------------------------------------------------
 # Runtime directories + constants
@@ -887,53 +904,152 @@ async def analyze_logos(
 # Brand profile management
 # ---------------------------------------------------------------------------
 
+_SUPPORTED_DOC_EXTS = {".pdf", ".md", ".markdown", ".html", ".htm", ".txt"}
+
+
+def _doc_ext(filename: str) -> str:
+    return os.path.splitext(filename or "")[1].lower()
+
+
+def _mime_for(ext: str) -> str:
+    return {
+        ".pdf":  "application/pdf",
+        ".md":   "text/markdown",
+        ".markdown": "text/markdown",
+        ".html": "text/html",
+        ".htm":  "text/html",
+        ".txt":  "text/plain",
+    }.get(ext, "application/octet-stream")
+
+
 @app.post("/api/brand/onboard", tags=["Brand"])
 @limiter.limit("5/minute")
 async def onboard_brand(
     request: Request,
     brand_name: str = Form(...),
     brand_id: str = Form(""),
-    guideline_pdf: UploadFile = File(...),
+    guideline_pdf: Optional[UploadFile] = File(None),
+    documents: List[UploadFile] = File([]),
+    chunking_strategy: str = Form(""),
+    chunking_config_json: str = Form("{}"),
     approved_images: List[UploadFile] = File([]),
     rejected_images: List[UploadFile] = File([]),
     rejection_reasons: str = Form("[]"),
 ):
     """
-    Brand onboarding: ingest a PDF guideline + optional approved/rejected images.
+    Brand onboarding: ingest one or more guideline documents (pdf/md/html/txt)
+    plus optional approved/rejected example images.
 
-    Returns `{brand_id, brand_name, extracted_rules, chunks_indexed, assets_indexed}`.
+    Returns `{brand_id, brand_name, extracted_rules, documents[], assets_indexed}`.
     """
     if not brand_name.strip():
         raise HTTPException(status_code=400, detail="brand_name is required")
-    if not guideline_pdf.filename or not guideline_pdf.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="guideline_pdf must be a PDF file")
 
-    # Save PDF temporarily
-    pdf_filename = secure_filename(guideline_pdf.filename)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    pdf_path = str(UPLOAD_DIR / f"{timestamp}_{pdf_filename}")
-    with open(pdf_path, "wb") as f_out:
-        f_out.write(await guideline_pdf.read())
+    # Collect docs: legacy guideline_pdf field is prepended for BC.
+    all_docs: List[UploadFile] = []
+    if guideline_pdf is not None and guideline_pdf.filename:
+        all_docs.append(guideline_pdf)
+    for d in documents:
+        if d and d.filename:
+            all_docs.append(d)
 
+    if not all_docs:
+        raise HTTPException(
+            status_code=400,
+            detail="at least one guideline document (guideline_pdf or documents[]) is required",
+        )
+
+    for d in all_docs:
+        ext = _doc_ext(d.filename)
+        if ext not in _SUPPORTED_DOC_EXTS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unsupported document type: {d.filename} ({ext or 'no extension'})",
+            )
+
+    # Chunking config — merge request-level overrides over rag.yaml defaults.
     try:
-        logger.info("Extracting rules from PDF for brand: %s", brand_name)
-        structured_rules, chunks = pdf_extractor.extract(pdf_path)
-    finally:
-        try:
-            os.remove(pdf_path)
-        except Exception:
-            pass
+        request_overrides = json.loads(chunking_config_json) if chunking_config_json else {}
+    except Exception:
+        raise HTTPException(status_code=400, detail="chunking_config_json must be valid JSON")
+    base_cfg = load_rag_config()
+    cfg = apply_overrides(base_cfg, {"chunking": request_overrides} if request_overrides else None)
+    chunking_cfg = cfg.get("chunking", {})
+    strategy = (chunking_strategy or chunking_cfg.get("default_strategy", "recursive")).strip()
+    if strategy not in {"fixed", "recursive", "semantic"}:
+        raise HTTPException(status_code=400, detail=f"unknown chunking strategy: {strategy}")
 
     brand_id_override = brand_id.strip() or None
     bid = brand_store.create(brand_name.strip(), brand_id=brand_id_override)
     brand_store.update(bid, {
-        "rules": structured_rules,
         "qdrant_guideline_collection": text_rag.collection_name(bid),
         "qdrant_asset_collection": asset_rag.collection_name(bid),
     })
 
-    chunks_indexed = text_rag.index_chunks(bid, chunks)
-    brand_store.update(bid, {"chunk_count": chunks_indexed})
+    chunker = get_chunker(strategy, chunking_cfg)
+    document_records: List[Dict[str, Any]] = []
+    structured_rules: Optional[Dict[str, Any]] = None
+    total_indexed = 0
+
+    for upload in all_docs:
+        filename = secure_filename(upload.filename) or upload.filename
+        ext = _doc_ext(filename)
+        mime = _mime_for(ext)
+        data = await upload.read()
+        doc_id = str(uuid.uuid4())
+
+        raw_key = s3_client.upload_raw(bid, doc_id, filename, data, content_type=mime)
+
+        raw_doc = load_document(data, filename=filename)
+
+        # Run structured-rule extraction against the FIRST PDF only, preserving
+        # today's behavior.
+        if ext == ".pdf" and structured_rules is None:
+            structured_rules = pdf_extractor._extract_rules_via_llm(raw_doc.plaintext)
+
+        chunk_objs = chunker.split(raw_doc)
+        chunk_dicts = [c.__dict__ for c in chunk_objs]
+        for c in chunk_dicts:
+            c["doc_id"] = doc_id
+
+        processed_key = s3_client.upload_processed(bid, doc_id, {
+            "doc_id": doc_id,
+            "source_filename": filename,
+            "mime_type": mime,
+            "plaintext": raw_doc.plaintext,
+            "sections": [s.__dict__ for s in raw_doc.sections],
+            "pages": [p.__dict__ for p in raw_doc.pages],
+            "chunks": chunk_dicts,
+            "chunking_strategy": strategy,
+        })
+
+        index_result = text_rag.index_chunks(bid, chunk_dicts)
+
+        doc_meta = {
+            "doc_id": doc_id,
+            "source_filename": filename,
+            "mime_type": mime,
+            "raw_s3_key": raw_key,
+            "processed_s3_key": processed_key,
+            "chunking_strategy": strategy,
+            "chunk_count_indexed": index_result["indexed"],
+            "chunk_count_skipped_dedup": index_result["skipped_dedup"],
+            "char_count": len(raw_doc.plaintext),
+        }
+        brand_store.add_document(bid, doc_meta)
+
+        document_records.append({
+            **doc_meta,
+            "dropped": index_result.get("dropped", []),
+        })
+        total_indexed += index_result["indexed"]
+
+    if structured_rules is None:
+        structured_rules = pdf_extractor._empty_rules()
+    brand_store.update(bid, {
+        "rules": structured_rules,
+        "chunk_count": total_indexed,
+    })
 
     # Approved images
     approved_bytes = []
@@ -958,15 +1074,19 @@ async def onboard_brand(
     assets_indexed = asset_rag.index_assets(bid, approved_bytes, rejected_entries)
     brand_store.update(bid, {"asset_count": assets_indexed})
 
-    logger.info("Brand onboarding complete: %s, chunks=%d, assets=%d", bid, chunks_indexed, assets_indexed)
+    logger.info(
+        "Brand onboarding complete: %s, docs=%d, chunks=%d, assets=%d",
+        bid, len(document_records), total_indexed, assets_indexed,
+    )
 
     return {
         "success": True,
         "brand_id": bid,
         "brand_name": brand_name.strip(),
         "extracted_rules": structured_rules,
-        "chunks_indexed": chunks_indexed,
+        "chunks_indexed": total_indexed,
         "assets_indexed": assets_indexed,
+        "documents": document_records,
     }
 
 
@@ -999,6 +1119,64 @@ async def delete_brand(brand_id: str, request: Request):
     asset_rag.delete_brand_collection(brand_id)
     brand_store.delete(brand_id)
     return {"success": True, "brand_id": brand_id}
+
+
+@app.post("/api/brand/{brand_id}/retrieve", tags=["Brand"])
+@limiter.limit("30/minute")
+async def debug_retrieve(brand_id: str, request: Request):
+    """Debug endpoint: run hybrid retrieval and return the full structured result.
+
+    Body: {"query": "...", "top_k": 5, "candidate_pool": 20}
+    """
+    if not brand_store.get(brand_id):
+        raise HTTPException(status_code=404, detail="Brand not found")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    query = (body or {}).get("query", "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Missing 'query' in request body")
+    top_k = body.get("top_k")
+    candidate_pool = body.get("candidate_pool")
+    result = text_rag.retrieve_hybrid(
+        brand_id=brand_id,
+        query=query,
+        top_k=int(top_k) if top_k is not None else None,
+        candidate_pool=int(candidate_pool) if candidate_pool is not None else None,
+    )
+    return {"success": True, "result": result.to_dict()}
+
+
+@app.post("/api/brand/{brand_id}/ask", tags=["Brand"])
+@limiter.limit("30/minute")
+async def ask_brand(brand_id: str, request: Request):
+    """Ask a grounded, cited question about a brand's guidelines.
+
+    Body: {"question": "...", "brand_override": {...} (optional)}
+
+    Returns the structured GroundedResponse — always includes either a cited
+    answer above confidence threshold or a structured `is_idk=true` payload
+    describing what was found and what is missing.
+    """
+    if not brand_store.get(brand_id):
+        raise HTTPException(status_code=404, detail="Brand not found")
+    if grounded_rag_pipeline is None:
+        raise HTTPException(status_code=503, detail="Grounded RAG pipeline not initialized")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    question = (body or {}).get("question", "")
+    if not isinstance(question, str) or not question.strip():
+        raise HTTPException(status_code=400, detail="Missing 'question' in request body")
+    brand_override = body.get("brand_override") if isinstance(body, dict) else None
+    response = grounded_rag_pipeline.answer(
+        brand_id=brand_id,
+        question=question,
+        brand_override=brand_override if isinstance(brand_override, dict) else None,
+    )
+    return {"success": True, "result": response.to_dict()}
 
 
 # ---------------------------------------------------------------------------

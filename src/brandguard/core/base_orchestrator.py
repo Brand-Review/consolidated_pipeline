@@ -255,9 +255,12 @@ class BasePipelineOrchestrator:
                 few_shot_examples: List[Dict] = []
 
                 seen_chunks: set = set()
+                retrieval_debug: List[Dict] = []
                 for check_type in ("color", "typography", "logo", "copywriting"):
                     try:
-                        chunk = self.text_rag.retrieve(brand_id, check_type, top_k=2)
+                        rr = self.text_rag.retrieve_hybrid_for_check(brand_id, check_type, top_k=2)
+                        chunk = rr.as_concatenated_text()
+                        retrieval_debug.append({"check_type": check_type, **rr.to_dict()})
                         if chunk and chunk not in seen_chunks:
                             seen_chunks.add(chunk)
                             brand_context_parts.append(f"### {check_type.title()} Guidelines\n{chunk}")
@@ -371,6 +374,7 @@ class BasePipelineOrchestrator:
                         'analysis_type': 'image_analysis',
                         '_judge_verdict': judge_verdict,   # kept for _calculate_overall_compliance
                         '_verdict_mode': verdict_mode,     # kept for _generate_verdict
+                        'retrieval_debug': retrieval_debug,
                     }
                 else:
                     logger.warning("[_analyze_image] LLM judge returned None — falling back to rule-based")

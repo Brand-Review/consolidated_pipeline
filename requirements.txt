@@ -69,3 +69,6 @@ sentence-transformers>=3.0.0    # multilingual-e5-large text embeddings
 qdrant-client>=1.9.0            # Qdrant vector DB client
 open-clip-torch>=2.24.0         # CLIP image embeddings (ViT-B/32)
 pymongo>=4.6.0                  # MongoDB brand profile metadata store
+fastembed>=0.3.0                # Qdrant/bm25 sparse embeddings
+markdown-it-py>=3.0.0           # Markdown AST for heading-aware loader
+boto3>=1.34.0                   # S3 raw/processed document storage
