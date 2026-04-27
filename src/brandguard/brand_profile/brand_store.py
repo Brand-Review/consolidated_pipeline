@@ -99,6 +99,19 @@ class BrandStore:
             {"$set": updates},
         )
 
+    def add_document(self, brand_id: str, doc_meta: Dict[str, Any]):
+        """Append a document record to brand_profiles.documents via $push."""
+        doc_meta = dict(doc_meta)
+        doc_meta.setdefault("uploaded_at", datetime.utcnow())
+        self._get_collection().update_one(
+            {"brand_id": brand_id},
+            {
+                "$push": {"documents": doc_meta},
+                "$set": {"updated_at": datetime.utcnow()},
+            },
+            upsert=True,
+        )
+
     def delete(self, brand_id: str):
         """Delete a brand profile from MongoDB (Qdrant collections must be deleted separately)."""
         self._get_collection().delete_one({"brand_id": brand_id})

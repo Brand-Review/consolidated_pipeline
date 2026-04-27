@@ -1,25 +1,22 @@
 """
 PDF Rule Extractor
-Parses brand guideline PDFs into:
-  1. Section-chunked text segments (for RAG indexing)
-  2. Structured rules JSON (via OpenRouter LLM)
+Extracts structured brand rules (colors, typography, logo, brand voice) from a
+guideline PDF via OpenRouter. Plaintext extraction and chunking are now handled
+by `loaders/pdf_loader.py` and `chunkers/`.
 """
 
 from __future__ import annotations
 import logging
 import os
-import re
 from typing import Dict, Any, List, Tuple
 
 from ..core.llm_client import LLMClient, LLMResponseError
+from .loaders.pdf_loader import load_pdf
+from .loaders.base import RawDocument
+from .chunkers import get_chunker
+from .rag_config import load_rag_config, apply_overrides
 
 logger = logging.getLogger(__name__)
-
-# Section headings to split on (case-insensitive)
-_SECTION_PATTERNS = re.compile(
-    r"(?:^|\n)\s*(logo|color|colour|typography|font|brand voice|tone|copywriting|graphic|background|palette)\b",
-    re.IGNORECASE,
-)
 
 _OPENROUTER_RULE_EXTRACTION_PROMPT = """You are a brand compliance AI. Given the following brand guideline text, extract a JSON object with EXACTLY these keys:
 
@@ -59,97 +56,56 @@ Return ONLY the JSON object, no explanation. Brand guideline text:
 
 class PDFRuleExtractor:
     """
-    Extracts text chunks and structured rules from a brand guideline PDF.
-    Uses PyMuPDF for text extraction and OpenRouter for structured rule extraction.
+    Extracts structured brand rules from a PDF. Plaintext and chunks come
+    from the shared loader + chunker pipeline so non-PDF formats share the
+    same ingest path.
     """
 
     def __init__(self, openrouter_api_key: str = None, model: str = None):
         self.api_key = openrouter_api_key or os.environ.get("OPENROUTER_API_KEY", "")
-        # model defaults to OPENROUTER_MODEL env var so one env var controls all LLM calls
         self.model = model or os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
         self.llm = LLMClient(api_key=self.api_key, model=self.model)
 
-    def extract(self, pdf_path: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    def extract(
+        self,
+        pdf_path: str,
+        chunking_strategy: str = None,
+        chunking_overrides: Dict[str, Any] = None,
+    ) -> Tuple[Dict[str, Any], RawDocument, List[Dict[str, Any]]]:
         """
-        Parse a PDF and return (structured_rules_dict, text_chunks_list).
+        Parse a PDF and return (structured_rules, raw_document, chunks).
 
-        structured_rules_dict keys: color_rules, typography_rules, logo_rules, brand_voice_rules
-        text_chunks_list items: {"text": str, "section": str, "page": int}
+        chunks are dicts of {text, section, page, char_count, strategy,
+        chunk_index, source_filename}.
         """
-        raw_text_by_page = self._extract_text_pages(pdf_path)
-        full_text = "\n".join(raw_text_by_page.values())
-        chunks = self._chunk_by_section(raw_text_by_page)
-        structured_rules = self._extract_rules_via_llm(full_text)
-        return structured_rules, chunks
+        raw = load_pdf(pdf_path, filename=os.path.basename(pdf_path))
+        chunks = self._chunk(raw, chunking_strategy, chunking_overrides)
+        structured_rules = self._extract_rules_via_llm(raw.plaintext)
+        return structured_rules, raw, chunks
 
     # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
-    def _extract_text_pages(self, pdf_path: str) -> Dict[int, str]:
-        """Return {page_number: text} using PyMuPDF."""
-        try:
-            import fitz  # PyMuPDF
-        except ImportError:
-            raise ImportError("PyMuPDF (fitz) is required: pip install pymupdf")
-
-        pages: Dict[int, str] = {}
-        with fitz.open(pdf_path) as doc:
-            for i, page in enumerate(doc):
-                pages[i + 1] = page.get_text("text")
-        return pages
-
-    def _chunk_by_section(self, pages: Dict[int, str]) -> List[Dict[str, Any]]:
-        """
-        Split text into semantic chunks by section heading.
-        Returns list of {"text": str, "section": str, "page": int}.
-        """
-        chunks: List[Dict[str, Any]] = []
-        current_section = "General"
-        current_lines: List[str] = []
-        current_page = 1
-
-        for page_num, page_text in pages.items():
-            for line in page_text.splitlines():
-                m = _SECTION_PATTERNS.match(line.strip())
-                if m:
-                    # Flush current buffer as a chunk
-                    if current_lines:
-                        chunks.append({
-                            "text": " ".join(current_lines).strip(),
-                            "section": current_section,
-                            "page": current_page,
-                        })
-                        current_lines = []
-                    current_section = line.strip()
-                    current_page = page_num
-                else:
-                    cleaned = line.strip()
-                    if cleaned:
-                        current_lines.append(cleaned)
-
-        # Flush remainder
-        if current_lines:
-            chunks.append({
-                "text": " ".join(current_lines).strip(),
-                "section": current_section,
-                "page": current_page,
-            })
-
-        # Remove empty chunks
-        return [c for c in chunks if len(c["text"]) > 20]
+    def _chunk(
+        self,
+        raw: RawDocument,
+        strategy: str = None,
+        overrides: Dict[str, Any] = None,
+    ) -> List[Dict[str, Any]]:
+        cfg = load_rag_config()
+        if overrides:
+            cfg = apply_overrides(cfg, {"chunking": overrides})
+        chunking_cfg = cfg.get("chunking", {})
+        strategy = strategy or chunking_cfg.get("default_strategy", "recursive")
+        chunker = get_chunker(strategy, chunking_cfg)
+        chunks = chunker.split(raw)
+        return [c.__dict__ for c in chunks]
 
     def _extract_rules_via_llm(self, full_text: str) -> Dict[str, Any]:
-        """
-        Call OpenRouter to extract structured brand rules from the guideline text.
-        Falls back to empty rules dict on failure.
-        """
         if not self.api_key:
             logger.warning("No OPENROUTER_API_KEY set — returning empty rules")
             return self._empty_rules()
 
         try:
-            # Truncate to avoid token limits (~8k chars)
             truncated = full_text[:8000]
             messages = [
                 {

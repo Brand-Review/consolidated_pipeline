@@ -11,6 +11,7 @@ The Python ML backend for BrandReview. Orchestrates four independent brand-compl
 - [API Reference](#api-reference)
 - [Configuration](#configuration)
 - [Brand Profiles](#brand-profiles)
+- [Brand Knowledge RAG](#brand-knowledge-rag-phases-13)
 - [Analyzer Details](#analyzer-details)
 - [System Requirements](#system-requirements)
 - [Troubleshooting](#troubleshooting)
@@ -28,7 +29,12 @@ consolidated_pipeline/
 │   ├── typography_rules.yaml
 │   ├── brand_voice.yaml
 │   ├── logo_detection.yaml
+│   ├── rag.yaml                   # Phase 1/2/3 chunking, embedding, retrieval, generation
 │   └── production.yaml
+├── prompts/
+│   ├── grounded_answer_v1.yaml    # Phase 3 grounded-answer prompt
+│   ├── citation_verifier_v1.yaml  # Phase 3 LLM-as-judge citation check
+│   └── brand_compliance_judge_v1.yaml
 └── src/brandguard/
     ├── config/settings.py          # Typed settings dataclasses
     ├── core/
@@ -39,12 +45,38 @@ consolidated_pipeline/
     │   ├── copywriting_analyzer.py
     │   ├── logo_analyzer.py
     │   ├── brand_compliance_judge.py  # OpenRouter LLM judge
+    │   ├── llm_client.py           # Shared OpenRouter chat client (Phase 3)
     │   └── model_imports.py        # Dynamic model loader
     └── brand_profile/
         ├── brand_store.py          # MongoDB brand registry
-        ├── pdf_extractor.py        # PDF guideline ingestion
-        ├── text_rag.py             # Qdrant text retrieval
-        └── asset_rag.py            # Qdrant image retrieval
+        ├── document_store.py       # documents[] persistence (Phase 1)
+        ├── pdf_extractor.py        # Structured-rule extraction (LLM)
+        ├── s3_client.py            # Raw + processed upload/download (Phase 1)
+        ├── embeddings.py           # E5 dense + Qdrant BM25 sparse encoders
+        ├── deduper.py              # Within-brand cosine ≥ 0.95 dedup
+        ├── loaders/                # Phase 1 multi-format ingestion
+        │   ├── pdf_loader.py       # PyMuPDF + heading detection
+        │   ├── markdown_loader.py
+        │   ├── html_loader.py
+        │   └── text_loader.py
+        ├── chunkers/               # Phase 1 pluggable chunking strategies
+        │   ├── fixed_chunker.py
+        │   ├── recursive_chunker.py
+        │   └── semantic_chunker.py
+        ├── retrieval/              # Phase 2 hybrid retrieval
+        │   ├── hybrid_retriever.py # dense + BM25 + RRF + rerank
+        │   ├── rerankers/          # cross-encoder rerank
+        │   └── types.py
+        ├── generation/             # Phase 3 grounded RAG pipeline
+        │   ├── grounded_pipeline.py    # Orchestrator behind /ask
+        │   ├── grounded_generator.py   # Cited-answer LLM call
+        │   ├── citation_parser.py      # Extract [N] claims
+        │   ├── citation_verifier.py    # LLM-as-judge support check
+        │   ├── completeness_judge.py
+        │   ├── confidence_scorer.py    # composite = 0.4 ret + 0.4 cov + 0.2 comp
+        │   └── idk_responder.py        # Structured "I don't know" payload
+        ├── text_rag.py             # Qdrant write + dense-only legacy read path
+        └── asset_rag.py            # Qdrant image retrieval (unchanged)
 ```
 
 ### Request Lifecycle
@@ -81,10 +113,11 @@ The main `/api/analyze` endpoint is **async**: it returns `{job_id, status: "pro
 | Dependency | Purpose |
 |---|---|
 | Python 3.8+ | Runtime |
-| MongoDB | Brand profile storage |
-| Qdrant | RAG vector store for brand profiles |
+| MongoDB | Brand profile + document metadata storage |
+| Qdrant | Hybrid (dense + BM25 sparse) RAG vector store |
+| AWS S3 (optional) | Raw + processed brand-document persistence (Phase 1) |
 | vLLM server (optional) | Logo detection fallback + copywriting |
-| OpenRouter API key (optional) | Copywriting LLM via `HybridToneAnalyzer` |
+| OpenRouter API key | Copywriting + Phase 3 grounded RAG (`/ask`) |
 
 ### Installation
 
@@ -273,22 +306,30 @@ curl -X POST http://localhost:5001/api/analyze/logo \
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/brand/onboard` | Ingest brand guidelines PDF + example images |
+| `POST` | `/api/brand/onboard` | Ingest brand guidelines (PDF / Markdown / HTML / TXT) + example images |
 | `GET` | `/api/brand` | List all registered brands |
-| `GET` | `/api/brand/<brand_id>` | Get brand profile by ID |
+| `GET` | `/api/brand/<brand_id>` | Get brand profile by ID (includes `documents[]`) |
 | `DELETE` | `/api/brand/<brand_id>` | Delete brand + Qdrant collections |
+| `POST` | `/api/brand/<brand_id>/retrieve` | Phase 2 hybrid retrieval debug endpoint |
+| `POST` | `/api/brand/<brand_id>/ask` | Phase 3 grounded, cited Q&A over brand knowledge |
 
-**Onboarding a brand**
+**Onboarding a brand (Phase 1 multi-format ingestion)**
 
 ```bash
 curl -X POST http://localhost:5001/api/brand/onboard \
   -F "brand_name=Acme Corp" \
   -F "brand_id=<optional-mongodb-folder-id>" \
-  -F "guideline_pdf=@brand_guidelines.pdf" \
+  -F "documents=@guidelines.pdf" \
+  -F "documents=@voice.md" \
+  -F "documents=@logo-rules.html" \
+  -F "chunking_strategy=recursive" \
   -F "approved_images=@approved1.jpg" \
   -F "rejected_images=@rejected1.jpg" \
   -F 'rejection_reasons=[["off-brand colors","wrong logo placement"]]'
 ```
+
+`chunking_strategy` is one of `fixed`, `recursive` (default), or `semantic`. The
+legacy `guideline_pdf=@…` field is still accepted for backward compatibility.
 
 Response:
 ```json
@@ -297,8 +338,53 @@ Response:
   "brand_id": "...",
   "brand_name": "Acme Corp",
   "extracted_rules": { ... },
-  "chunks_indexed": 48,
+  "documents": [
+    {
+      "doc_id": "uuid",
+      "source_filename": "voice.md",
+      "chunks_indexed": 14,
+      "chunks_skipped_dedup": 2,
+      "raw_s3_key": "brand-onboarding/.../raw/voice.md"
+    }
+  ],
   "assets_indexed": 3
+}
+```
+
+**Asking a grounded question (Phase 3)**
+
+```bash
+curl -X POST http://localhost:5001/api/brand/<brand_id>/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"What is the minimum logo clear space?"}'
+```
+
+Happy-path response:
+```json
+{
+  "success": true,
+  "result": {
+    "answer": "The logo must have at least 20 px of clear space on all sides [1].",
+    "citations": [{ "idx": 1, "status": "supported", ... }],
+    "confidence": { "composite": 0.84, "retrieval": 0.93, "citation_coverage": 1.0, "completeness": 0.7 },
+    "unsupported_claims": [],
+    "is_idk": false,
+    "retrieval_debug": { "latency_ms": 412.7, "used_strategies": ["dense","sparse","rerank"], "chunk_count": 5 }
+  }
+}
+```
+
+When the gate fires (composite < 0.4 or retrieval < 0.3, or the generator
+itself refuses), the result switches to a structured IDK payload:
+
+```json
+{
+  "answer": null,
+  "is_idk": true,
+  "idk_reason": "low_composite_confidence",
+  "found": [{ "idx": 1, "source_filename": "voice.md", "section": "Brand Voice", "page": 1, "preview": "...", "rerank_score": 0.82 }],
+  "missing": "The retrieved context did not adequately support a cited answer to the question.",
+  "suggested_documents": [{ "source_filename": "voice.md", ... }]
 }
 ```
 
@@ -370,10 +456,14 @@ brand_voice:
 
 | Variable | Required | Description |
 |---|---|---|
-| `OPENROUTER_API_KEY` | Recommended | Powers `HybridToneAnalyzer` and `BrandComplianceJudge` |
+| `OPENROUTER_API_KEY` | Yes | Powers `HybridToneAnalyzer`, `BrandComplianceJudge`, and Phase 3 grounded RAG (`/ask`) |
+| `OPENROUTER_MODEL` | Optional | Override default chat model (e.g. `openai/gpt-4o-mini`) |
 | `INTERNAL_WEBHOOK_SECRET` | Yes (matches br-be) | Signs callback POSTs |
-| `MONGODB_URI` | Yes | Brand profile persistence |
-| `QDRANT_URL` | Yes | RAG vector store |
+| `MONGODB_URI` | Yes | Brand profile + document metadata persistence |
+| `QDRANT_URL` | Yes | Hybrid (dense + BM25) vector store |
+| `S3_BUCKET_NAME` | Optional | Raw + processed brand-document persistence (Phase 1) |
+| `AWS_REGION` | Optional | Same as br-be S3 region |
+| `RAG_DISABLE_HYBRID` | Optional | Set `1` to force dense-only retrieval |
 
 ---
 
@@ -381,12 +471,238 @@ brand_voice:
 
 When a `brand_id` is supplied to `/api/analyze`, the pipeline enriches analysis with brand-specific context:
 
-1. **PDF extraction** — `PDFRuleExtractor` parses the brand guideline PDF into structured rules + text chunks.
-2. **Text RAG** — Chunks are embedded and indexed in Qdrant. At analysis time, relevant rules are retrieved and passed to `BrandComplianceJudge`.
-3. **Asset RAG** — Approved and rejected example images are embedded in Qdrant. Visual similarity against known rejects flags potential violations.
-4. **LLM judge** — `BrandComplianceJudge` synthesizes retrieved rules + analyzer outputs via OpenRouter (Qwen2.5-VL-32B-Instruct) to produce a final verdict with citations.
+1. **Multi-format ingestion (Phase 1)** — PDF / Markdown / HTML / TXT files go through pluggable loaders → chunkers → within-brand dedup, then are written to a Qdrant hybrid collection (dense E5 + BM25 sparse) and a MongoDB `documents[]` ledger. Raw bytes are persisted to S3 so re-indexing never requires re-upload.
+2. **Hybrid retrieval (Phase 2)** — `text_rag.retrieve_hybrid` runs dense + sparse queries in parallel, fuses with Reciprocal Rank Fusion (`0.7 dense + 0.3 sparse`), then cross-encoder reranks the candidate pool. Sparse failures degrade gracefully to dense-only with `fallback_reason="sparse_unavailable"`.
+3. **Grounded Q&A (Phase 3)** — `POST /api/brand/{brand_id}/ask` produces cited answers (`[N]` chunk references), runs LLM-as-judge citation verification, scores composite confidence, and returns a structured "I don't know" payload when the gate fires.
+4. **Structured rules** — `PDFRuleExtractor` still runs on the first PDF to populate the legacy `extracted_rules` block.
+5. **Asset RAG** — Approved and rejected example images are embedded in Qdrant. Visual similarity against known rejects flags potential violations.
+6. **LLM judge** — `BrandComplianceJudge` synthesizes retrieved rules + analyzer outputs via OpenRouter to produce a final verdict with inline `[N]` citations against the numbered brand rules.
 
 Without a `brand_id`, analyzers use the static config defaults in `configs/`.
+
+---
+
+## Brand Knowledge RAG (Phases 1–3)
+
+The brand-knowledge RAG stack is split into three phases that share one Qdrant
+collection (`brand_{brand_id}_guidelines`) and one MongoDB document ledger.
+Phase 1 owns the **write path**, Phase 2 + 3 own the **read path**.
+
+### Top-level: two flows share one storage layer
+
+```
+           ┌─────────────────────────────────────────────────────────┐
+           │                   SHARED STORAGE                        │
+           │  ┌──────────┐   ┌──────────────┐   ┌───────────────┐    │
+           │  │   S3     │   │   MongoDB    │   │   Qdrant      │    │
+           │  │ raw docs │   │ brand_profile│   │ hybrid coll.  │    │
+           │  │          │   │ .documents[] │   │ dense + BM25  │    │
+           │  └──────────┘   └──────────────┘   └───────────────┘    │
+           └─────────▲─────────────▲──────────────────▲──────────────┘
+                     │             │                  │
+          ┌──────────┴─────┐       │      ┌───────────┴──────────┐
+          │ PHASE 1: WRITE │       │      │ PHASE 2 + 3: READ    │
+          │  (onboard)     │       │      │ (ask / retrieve)     │
+          └────────────────┘       │      └──────────────────────┘
+                                   │
+                           metadata ↑↓
+```
+
+### Phase 1 — Ingestion (`POST /api/brand/onboard`)
+
+```
+br-fe setup page
+  │  (docs[], strategy, overrides)
+  ▼
+br-be  ──relays multipart──▶  consolidated_pipeline  POST /api/brand/onboard
+                                        │
+                                        ▼
+                ┌──────────── per-file loop ────────────┐
+                │                                       │
+                │  1. s3_client.upload_raw  ─────────▶  S3 (raw bytes)
+                │                                       │
+                │  2. DocumentLoader.load(file)         │
+                │     ├── pdf_loader   (PyMuPDF)        │
+                │     ├── markdown_loader (md-it)       │
+                │     ├── html_loader  (bs4)            │
+                │     └── text_loader  (passthrough)    │
+                │         → RawDocument{plaintext,      │
+                │             sections, pages}          │
+                │                                       │
+                │  3. s3_client.upload_processed ────▶  S3 (plaintext.json)
+                │                                       │
+                │  4. Chunker.split(doc, strategy)      │
+                │     ├── fixed      (size+overlap)     │
+                │     ├── recursive  (headings→seps)    │
+                │     └── semantic   (sentence-sim)     │
+                │         → [Chunk{text, section,       │
+                │             page, chunk_index, …}]    │
+                │                                       │
+                │  5. Deduper.filter_new_chunks         │
+                │     (cosine ≥ 0.95 vs brand index)    │
+                │         → kept[], skipped[]           │
+                │                                       │
+                │  6. EmbeddingService                  │
+                │     ├── embed_dense_passages (E5)     │
+                │     └── embed_sparse_passages(BM25)   │
+                │                                       │
+                │  7. QdrantStore.upsert atomic ─────▶  Qdrant
+                │     (dense + sparse in one call)      │  named vec "dense" (1024, COSINE)
+                │                                       │  sparse vec "bm25"
+                │                                       │  payload: text, section, page,
+                │                                       │           chunk_index, source_filename,
+                │                                       │           chunking_strategy, char_count,
+                │                                       │           doc_id, brand_id
+                │                                       │
+                │  8. brand_store.add_document ──────▶  MongoDB
+                │     ($push documents[])               │  doc_id, s3 keys,
+                │                                       │  chunk_count_indexed,
+                │                                       │  chunk_count_skipped_dedup, …
+                └───────────────────────────────────────┘
+                                        │
+                                        ▼
+                    structured-rule extraction (1st PDF only, unchanged)
+                                        │
+                                        ▼
+                 response: {brand_id, documents: [{doc_id, chunks_indexed,
+                                                   chunks_skipped_dedup, …}]}
+```
+
+### Phase 2 — Hybrid Retrieval (used by Phase 3 and `/retrieve`)
+
+```
+text_rag.retrieve_hybrid(brand_id, query, brand_override?)
+        │
+        ▼
+  HybridRetriever.retrieve
+        │
+        ├── EmbeddingService.embed_dense_query(q)          ┐
+        │   → Qdrant query_points(using="dense")           │  parallel
+        │                                                  │
+        ├── EmbeddingService.embed_sparse_query(q)         │
+        │   → Qdrant query_points(using="bm25")            ┘
+        │
+        ├── Reciprocal Rank Fusion
+        │     fused = 0.7 · dense_rrf + 0.3 · sparse_rrf
+        │     → candidate pool (top N)
+        │
+        ├── Cross-encoder rerank (fine top_k over candidates)
+        │     → rerank_score per chunk
+        │
+        └── fallback handling
+              sparse missing → "dense-only"
+              query failure   → fallback_reason populated
+        │
+        ▼
+RetrievalResult {
+  query, chunks: [Reranked{candidate, fused_score, rerank_score, ranks}],
+  latency_ms, used_strategies: [dense, sparse, rerank],
+  fallback_reason
+}
+```
+
+### Phase 3 — Grounded Generation (`POST /api/brand/{brand_id}/ask`)
+
+```
+Client
+  │ { question, brand_override? }
+  ▼
+app.py  ask_brand()
+  ├── 404 if brand not found
+  ├── 503 if pipeline not initialized
+  ├── 400 if question blank
+  ▼
+GroundedRAGPipeline.answer(brand_id, question, brand_override)
+  │
+  ▼
+ [1] text_rag.retrieve_hybrid  ────────►  Phase 2
+  │
+  │  chunks == [] ?  ──yes──► IDK (reason = fallback_reason || no_retrieved_chunks)
+  │
+  ▼
+ [2] GroundedGenerator.generate(q, chunks)
+  │     prompt: grounded_answer_v1.yaml  (numbered context [1]…[N])
+  │     LLMClient.chat(json_object) → {"answer": "…[N]…"}
+  │     CitationParser.parse(text) → claims[], cited_indices
+  │     → RawAnswer{text, claims, said_idk, usage}
+  │
+  │  said_idk ?  ──yes──► IDK (reason = generator_said_idk)
+  │
+  ▼
+ [3] CitationVerifier.verify(claims, chunks)   ← LLM-as-judge
+  │     per claim: decide supported | unsupported | partial
+  │     → VerifiedAnswer{text, claims, citations[{idx,status,…}]}
+  │
+  ▼
+ [4] CompletenessJudge.judge(q, answer_text)   ← LLM-as-judge
+  │     → completeness ∈ [0,1]
+  │
+  ▼
+ [5] ConfidenceScorer.score(retrieval, verified, completeness)
+  │     retrieval         = f(top rerank_score)
+  │     citation_coverage = supported / total claims
+  │     completeness      = judge output
+  │     composite = 0.4·retrieval + 0.4·coverage + 0.2·completeness
+  │     → ConfidenceBreakdown
+  │
+  ▼
+ [6] IDK gate
+       composite < 0.4  OR  retrieval < 0.3 ?
+         │
+         ├── yes ─► IDKResponder.synthesize
+         │            found[]:        top retrieved chunks (preview, section, page, score)
+         │            missing:        reason from LLM tail or templated
+         │            suggested_documents: unique source filenames
+         │          → GroundedResponse{is_idk:true, idk_reason, found, missing, …}
+         │
+         └── no  ─► GroundedResponse{
+                      answer, citations, confidence,
+                      unsupported_claims (claims whose cited chunk was judged unsupported),
+                      is_idk:false, retrieval_debug
+                    }
+```
+
+### Request life-cycle at a glance
+
+```
+User asks    ─────►  FE    ─────►  BE    ─────►  Pipeline /ask
+                                                  │
+                                                  ▼
+                                            Phase 2 (retrieve)
+                                                  │  Qdrant (dense + sparse)
+                                                  ▼
+                                            Phase 3 (generate → verify → judge → score)
+                                                  │  OpenRouter LLM × 3
+                                                  ▼
+                                            IDK gate → GroundedResponse
+                                                  │
+User gets  ◄─────  FE  ◄─────  BE  ◄─────────────┘
+  { answer + [N] citations + confidence }   OR   { is_idk, found, missing, suggested }
+```
+
+### Single-collection invariant
+
+`brand_{brand_id}_guidelines` stores **one Qdrant point per chunk** carrying
+**both** a 1024-d dense vector (`"dense"`) and a BM25 sparse vector (`"bm25"`).
+Phase 1 writes both atomically; Phase 2 reads both in parallel and fuses.
+That is why Phase 2 needed no re-ingest after Phase 1, and why
+`fallback_reason="sparse_unavailable"` is a soft degradation rather than a
+hard failure.
+
+### Key knobs in `configs/rag.yaml`
+
+| Section | Knob | Effect |
+|---|---|---|
+| `chunking.default_strategy` | `fixed` \| `recursive` \| `semantic` | Per-onboard default; overridable per request |
+| `chunking.recursive.chunk_size` | int | Soft max chars per chunk |
+| `embeddings.dense_model` | model id | E5 model used for both passages and queries |
+| `embeddings.sparse_model` | model id | Qdrant-served BM25 |
+| `dedup.cosine_threshold` | float | Within-brand dedup similarity cutoff (default `0.95`) |
+| `retrieval.fusion_weights` | `{dense, sparse}` | RRF weights (default `0.7 / 0.3`) |
+| `retrieval.rerank_top_k` | int | Cross-encoder rerank window |
+| `confidence.thresholds.idk_composite` | float | IDK gate (default `0.4`) |
+| `confidence.thresholds.idk_retrieval` | float | IDK gate (default `0.3`) |
+| `verification.enabled` | bool | Toggle LLM-as-judge citation verification |
 
 ---
 

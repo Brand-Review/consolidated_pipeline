@@ -38,6 +38,9 @@ _DEFAULT_VERSIONS: Dict[str, str] = {
     "copywriting_image_openrouter": "v1",
     "logo_judge": "v1",
     "logo_detector": "v1",
+    "grounded_answer": "v1",
+    "citation_judge": "v1",
+    "completeness_judge": "v1",
 }
 
 
